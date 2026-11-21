@@ -1,0 +1,28 @@
+[Unit]
+Description=Podman pod for NethServer 8 Central Monitoring Hub
+Wants=prometheus.service loki.service alertmanager.service grafana.service prom-label-proxy.service blackbox-exporter.service snmp-exporter.service hub-gateway.service
+Before=prometheus.service loki.service alertmanager.service grafana.service prom-label-proxy.service blackbox-exporter.service snmp-exporter.service hub-gateway.service thanos-sidecar.service thanos-store.service thanos-query.service
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+EnvironmentFile=-%E/etc/defaults.env
+EnvironmentFile=%E/state/environment
+WorkingDirectory=%E/state
+Restart=always
+TimeoutStopSec=70
+ExecStartPre=/bin/rm -f %t/central-monitoring-hub.pid %t/central-monitoring-hub.pod-id
+ExecStartPre=/usr/bin/podman pod create \
+    --infra-conmon-pidfile %t/central-monitoring-hub.pid \
+    --pod-id-file %t/central-monitoring-hub.pod-id \
+    --name central-monitoring-hub \
+    --publish 127.0.0.1:${TCP_PORT}:8080 \
+    --network=slirp4netns:allow_host_loopback=true \
+    --replace
+ExecStart=/usr/bin/podman pod start --pod-id-file %t/central-monitoring-hub.pod-id
+ExecStop=/usr/bin/podman pod stop --ignore --pod-id-file %t/central-monitoring-hub.pod-id -t 10
+ExecStopPost=/usr/bin/podman pod rm --ignore -f --pod-id-file %t/central-monitoring-hub.pod-id
+PIDFile=%t/central-monitoring-hub.pid
+Type=forking
+
+[Install]
+WantedBy=default.target

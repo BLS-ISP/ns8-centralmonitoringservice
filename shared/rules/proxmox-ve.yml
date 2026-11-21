@@ -1,0 +1,136 @@
+# NS8 Central Monitoring Service — Proxmox VE Alert Rules (pve_exporter + optional node_exporter)
+# Capability: telemetry-contract (shared/rules/proxmox-ve.yml)
+
+groups:
+  - name: proxmox.ve.cluster_and_nodes
+    interval: 30s
+    rules:
+      - alert: ProxmoxExporterUnreachable
+        expr: up{device_role="proxmox"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          category: cluster
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Proxmox-Exporter/API nicht erreichbar ({{ $labels.instance }})"
+          description: "Die Proxmox-VE-Überwachung für {{ $labels.instance }} (Mandant: {{ $labels.customer }}, Standort: {{ $labels.site }}) antwortet seit über 3 Minuten nicht."
+
+      - alert: ProxmoxNodeOffline
+        expr: pve_up{id=~"node/.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          category: cluster
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Proxmox-VE-Knoten {{ $labels.id }} offline ({{ $labels.instance }})"
+          description: "Der Proxmox-VE-Hypervisor {{ $labels.id }} im Cluster {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) meldet Status offline (pve_up == 0)."
+
+      - alert: ProxmoxClusterQuorumLost
+        expr: >
+          (pve_up{id=~"cluster/.*"} == 0)
+          or
+          (pve_cluster_quorate == 0)
+        for: 1m
+        labels:
+          severity: critical
+          category: cluster
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Proxmox-Cluster hat Quorum verloren ({{ $labels.instance }})"
+          description: "Der Proxmox-VE-Cluster {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) hat das Corosync-Quorum verloren. HA-Failover und VM-Starts sind blockiert!"
+
+      - alert: ProxmoxNodeHighCpu
+        expr: (pve_cpu_usage_ratio{id=~"node/.*"} * 100) > 90
+        for: 15m
+        labels:
+          severity: warning
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Proxmox-Knoten {{ $labels.id }} CPU > 90% ({{ $labels.instance }})"
+          description: "Hypervisor {{ $labels.id }} ({{ $labels.instance }}, {{ $labels.customer }} / {{ $labels.site }}) weist seit 15 Minuten {{ printf \"%.1f\" $value }}% CPU-Last auf."
+
+      - alert: ProxmoxNodeHighMemory
+        expr: >
+          ((pve_memory_usage_bytes{id=~"node/.*"} / (pve_memory_size_bytes{id=~"node/.*"} > 0)) * 100) > 92
+        for: 10m
+        labels:
+          severity: warning
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Proxmox-Knoten {{ $labels.id }} RAM > 92% ({{ $labels.instance }})"
+          description: "Auf Hypervisor {{ $labels.id }} ({{ $labels.instance }}, {{ $labels.customer }} / {{ $labels.site }}) sind {{ printf \"%.1f\" $value }}% des Host-Arbeitsspeichers belegt."
+
+      - alert: ProxmoxHighCpuIoWait
+        expr: >
+          ((pve_iowait_ratio{id=~"node/.*"} * 100) > 20)
+          or
+          ((avg by (customer, site, instance) (rate(node_cpu_seconds_total{device_role="proxmox", mode="iowait"}[5m])) * 100) > 20)
+        for: 10m
+        labels:
+          severity: warning
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Hoher Proxmox IO-Delay (>20%) auf {{ $labels.instance }}"
+          description: "Auf Proxmox-VE-Host {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) liegt der CPU-I/O-Wait seit 10 Minuten bei {{ printf \"%.1f\" $value }}%."
+
+  - name: proxmox.ve.storage_and_guests
+    interval: 60s
+    rules:
+      - alert: ProxmoxStorageUnavailable
+        expr: pve_up{id=~"storage/.*"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Proxmox Storage {{ $labels.id }} nicht verfügbar ({{ $labels.instance }})"
+          description: "Der Proxmox-Storage-Pool {{ $labels.id }} auf {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) ist offline oder nicht gemountet."
+
+      - alert: ProxmoxStoragePoolSpaceWarning
+        expr: >
+          ((pve_disk_usage_bytes{id=~"storage/.*"} / (pve_disk_size_bytes{id=~"storage/.*"} > 0)) * 100) > 85
+          and
+          ((pve_disk_usage_bytes{id=~"storage/.*"} / (pve_disk_size_bytes{id=~"storage/.*"} > 0)) * 100) <= 95
+        for: 10m
+        labels:
+          severity: warning
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Proxmox Storage {{ $labels.id }} > 85% voll ({{ $labels.instance }})"
+          description: "Der Proxmox-Storage-Pool {{ $labels.id }} ({{ $labels.instance }}, {{ $labels.customer }} / {{ $labels.site }}) ist zu {{ printf \"%.1f\" $value }}% belegt."
+
+      - alert: ProxmoxStoragePoolSpaceCritical
+        expr: >
+          ((pve_disk_usage_bytes{id=~"storage/.*"} / (pve_disk_size_bytes{id=~"storage/.*"} > 0)) * 100) > 95
+        for: 5m
+        labels:
+          severity: critical
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Kritisch: Proxmox Storage {{ $labels.id }} > 95% voll ({{ $labels.instance }})"
+          description: "Akute Gefahr von VM-Pausen durch vollen Proxmox-Storage {{ $labels.id }} auf {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}): {{ printf \"%.1f\" $value }}% belegt."
+
+      - alert: ProxmoxZfsPoolDegraded
+        expr: >
+          (node_zfs_zpool_state{device_role="proxmox", state=~"degraded|faulted|offline|removed|unavail"} > 0)
+          or
+          (pve_zfs_pool_health{state!="ONLINE"} == 1)
+        for: 2m
+        labels:
+          severity: critical
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Proxmox ZFS-Pool degradiert auf {{ $labels.instance }}"
+          description: "Ein ZFS-Storage-Pool ({{ $labels.zpool }}{{ $labels.pool }}) auf Proxmox-Host {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) befindet sich nicht im Zustand ONLINE."
+
+      - alert: ProxmoxAutoStartGuestStopped
+        expr: >
+          (pve_onboot_status{id=~"(qemu|lxc)/.*"} == 1)
+          and on (customer, site, instance, id)
+          (pve_up{id=~"(qemu|lxc)/.*"} == 0)
+        for: 5m
+        labels:
+          severity: critical
+          category: cluster
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Auto-Start VM/LXC {{ $labels.id }} gestoppt ({{ $labels.instance }})"
+          description: "Die mit 'Start at boot' markierte VM bzw. der LXC-Container {{ $labels.id }} auf Proxmox {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) läuft nicht."

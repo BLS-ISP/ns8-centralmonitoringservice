@@ -1,0 +1,23 @@
+{
+  "id": "central-monitoring-collector",
+  "name": "Central Monitoring Collector",
+  "description": {
+    "en": "Lightweight rootless Grafana Alloy telemetry & log collector pushing NS8 and LAN infrastructure metrics to Central Monitoring Hub over HTTPS.",
+    "de": "Leichtgewichtiger Rootless-Grafana-Alloy-Kollektor zum sicheren HTTPS-Push von NS8- und LAN-Infrastruktur-Metriken & Logs an den Central Monitoring Hub."
+  },
+  "categories": ["monitoring", "administration"],
+  "authors": [
+    {
+      "name": "BLS-ISP Operations Engineering",
+      "email": "monitoring@bls-isp.net"
+    }
+  ],
+  "docs": {
+    "documentation_url": "https://github.com/BLS-ISP/ns8-centralmonitoringservice#readme",
+    "bug_url": "https://github.com/BLS-ISP/ns8-centralmonitoringservice/issues",
+    "code_url": "https://github.com/BLS-ISP/ns8-centralmonitoringservice"
+  },
+  "source": "ghcr.io/bls-isp/central-monitoring-collector",
+  "version": "1.0.0",
+  "license": "GPL-3.0-or-later"
+}

@@ -1,0 +1,85 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/collector-list-local-targets-output.json",
+  "title": "central-monitoring-collector list-local-targets output",
+  "type": "object",
+  "required": ["targets"],
+  "additionalProperties": false,
+  "properties": {
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "target_type",
+          "device_role",
+          "host",
+          "port",
+          "scrape_interval"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "enabled": { "type": "boolean" },
+          "target_type": {
+            "type": "string",
+            "enum": ["proxmox", "windows", "linux", "snmp", "custom-exporter"]
+          },
+          "device_role": {
+            "type": "string",
+            "enum": [
+              "ns8",
+              "linux",
+              "windows",
+              "proxmox",
+              "web",
+              "snmp-network",
+              "snmp-ups",
+              "snmp-nas",
+              "snmp-firewall",
+              "snmp-printer"
+            ]
+          },
+          "host": { "type": "string" },
+          "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "scrape_interval": { "type": "string" },
+          "scheme": { "type": "string", "enum": ["http", "https"] },
+          "metrics_path": { "type": "string" },
+          "tls_skip_verify": { "type": "boolean" },
+          "pve_token_id": { "type": "string" },
+          "has_pve_token_secret": { "type": "boolean" },
+          "snmp_module": {
+            "type": "string",
+            "enum": ["", "if_mib", "apcupsd", "synology", "qnap", "mikrotik", "fortigate", "printer", "generic"]
+          },
+          "snmp_version": { "type": "string" },
+          "has_snmp_secret": { "type": "boolean" },
+          "snmp_v3": {
+            "type": ["object", "null"],
+            "required": ["username", "security_level"],
+            "additionalProperties": false,
+            "properties": {
+              "username": { "type": "string" },
+              "security_level": {
+                "type": "string",
+                "enum": ["noAuthNoPriv", "authNoPriv", "authPriv"]
+              },
+              "auth_protocol": {
+                "type": "string",
+                "enum": ["MD5", "SHA", "SHA224", "SHA256", "SHA384", "SHA512"]
+              },
+              "priv_protocol": {
+                "type": "string",
+                "enum": ["DES", "AES", "AES192", "AES256"]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

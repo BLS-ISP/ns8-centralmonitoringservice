@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import sys
+
+for _candidate in (
+    Path(__file__).resolve().parents[2] / "pypkg",
+    Path("/imageroot/pypkg"),
+):
+    if _candidate.is_dir() and str(_candidate) not in sys.path:
+        sys.path.append(str(_candidate))
+
+from hub_tenancy.bundle_renderer import generate_agent_bundle  # noqa: E402
+from hub_tenancy.grafana_sync import _merged_env  # noqa: E402
+from hub_tenancy.store import resolve_state_dir  # noqa: E402
+
+
+def _fail_validation(field: str, value: object, error_code: str) -> None:
+    try:
+        import agent  # type: ignore[import-not-found]
+
+        agent.set_status("validation-failed")
+    except ImportError:
+        pass
+    json.dump(
+        [{"field": field, "parameter": field, "value": value, "error": error_code}],
+        sys.stdout,
+    )
+    sys.stdout.write("\n")
+    sys.exit(2)
+
+
+def main() -> None:
+    raw_in = sys.stdin.read().strip()
+    request = json.loads(raw_in) if raw_in else {}
+    state_dir = resolve_state_dir()
+    env_map = _merged_env(state_dir, os.environ)
+
+    hub_url = env_map.get("HUB_PUBLIC_URL", "").strip()
+    if not hub_url:
+        host = env_map.get("TRAEFIK_HOST", "").strip() or "monitoring.example.com"
+        hub_url = f"https://{host}"
+
+    customer = str(request["customer"]).strip()
+    site = str(request["site"]).strip()
+    platform = str(request["platform"]).strip()
+
+    try:
+        output = generate_agent_bundle(
+            state_dir,
+            customer=customer,
+            site=site,
+            platform=platform,
+            hub_url=hub_url,
+            collector_id=str(request.get("collector_id") or ""),
+            issue_dedicated_token=bool(request.get("issue_dedicated_token", True)),
+            syslog_port=int(request.get("syslog_port", 5514)),
+            env=env_map,
+        )
+    except KeyError:
+        _fail_validation("customer", customer, "tenant_not_found")
+        return
+    except ValueError as exc:
+        _fail_validation("site", site, str(exc))
+        return
+
+    json.dump(output, sys.stdout)
+    sys.stdout.write("\n")
+
+
+if __name__ == "__main__":
+    main()

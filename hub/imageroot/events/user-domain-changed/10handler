@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+"""Refresh Grafana ldap.toml when NS8 user domain / Ldapproxy configuration changes."""
+
+import sys
+from pathlib import Path
+
+_PYPKG = Path(__file__).resolve().parents[2] / "pypkg"
+if str(_PYPKG) not in sys.path:
+    sys.path.insert(0, str(_PYPKG))
+
+from hub_core import resolve_state_dir  # noqa: E402
+from hub_core.env_store import read_module_env  # noqa: E402
+
+
+def main() -> int:
+    state_dir = resolve_state_dir()
+    env = read_module_env(state_dir)
+
+    try:
+        from hub_tenancy.ldap_sync import sync_ldap_config
+
+        sync_ldap_config(state_dir, env)
+    except ImportError:
+        pass
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

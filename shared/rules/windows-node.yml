@@ -1,0 +1,174 @@
+# NS8 Central Monitoring Service — Windows Server Alert Rules (windows_exporter / Alloy windows)
+# Capability: telemetry-contract (shared/rules/windows-node.yml)
+
+groups:
+  - name: windows.node.availability
+    interval: 30s
+    rules:
+      - alert: WindowsHostDown
+        expr: up{device_role="windows"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Windows-Server nicht erreichbar / Host down ({{ $labels.instance }})"
+          description: "Windows-Server {{ $labels.instance }} (Mandant: {{ $labels.customer }}, Standort: {{ $labels.site }}) antwortet seit über 3 Minuten nicht mehr."
+
+      - alert: WindowsAgentTelemetryStale
+        expr: >
+          (max by (customer, site, instance, collector_id) (up{device_role="windows"} offset 15m))
+          unless
+          (max by (customer, site, instance, collector_id) (up{device_role="windows"}))
+        for: 5m
+        labels:
+          severity: critical
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Windows-Agent sendet keine Daten / Agent offline ({{ $labels.instance }})"
+          description: "Vom Windows-Server {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}, Collector: {{ $labels.collector_id }}) treffen keine Remote-Write-Metriken mehr im Hub ein."
+
+      - alert: WindowsHostRebooted
+        expr: >
+          (
+            ((time() - (windows_system_system_up_time{device_role="windows"} > 0)) < 600)
+            and
+            ((time() - windows_system_system_up_time{device_role="windows"}) > 0)
+          )
+          or
+          (
+            ((time() - (windows_os_boot_time_seconds{device_role="windows"} > 0)) < 600)
+            and
+            ((time() - windows_os_boot_time_seconds{device_role="windows"}) > 0)
+          )
+        for: 0m
+        labels:
+          severity: warning
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Windows-Server neu gestartet / Reboot detected ({{ $labels.instance }})"
+          description: "Windows-Server {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) wurde innerhalb der letzten 10 Minuten neu gestartet."
+
+  - name: windows.node.resources
+    interval: 60s
+    rules:
+      - alert: WindowsHighCpuUsage
+        expr: >
+          (100 - (avg by (customer, site, instance) (rate(windows_cpu_time_total{device_role="windows", mode="idle"}[5m])) * 100)) > 90
+        for: 15m
+        labels:
+          severity: warning
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Hohe CPU-Last (>90%) auf Windows-Server {{ $labels.instance }}"
+          description: "Die CPU-Auslastung auf Windows-Server {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) beträgt seit 15 Minuten {{ printf \"%.1f\" $value }}%."
+
+      - alert: WindowsLowAvailableMemoryWarning
+        expr: >
+          (
+            100 * (
+              1 - (
+                windows_memory_available_bytes{device_role="windows"}
+                /
+                ((windows_memory_physical_total_bytes{device_role="windows"} or windows_cs_physical_memory_bytes{device_role="windows"} or windows_os_visible_memory_bytes{device_role="windows"}) > 0)
+              )
+            )
+          ) > 90
+        for: 10m
+        labels:
+          severity: warning
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Hohe RAM-Belegung (>90%) auf Windows-Server {{ $labels.instance }}"
+          description: "Auf Windows-Server {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) sind {{ printf \"%.1f\" $value }}% des physischen Arbeitsspeichers ausgelastet."
+
+      - alert: WindowsCriticalAvailableMemory
+        expr: windows_memory_available_bytes{device_role="windows"} < 536870912
+        for: 5m
+        labels:
+          severity: critical
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Kritisch wenig freier RAM (<512 MiB) auf {{ $labels.instance }}"
+          description: "Windows-Server {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) verfügt über weniger als 512 MiB freien Arbeitsspeicher."
+
+      - alert: WindowsLogicalDiskLowWarning
+        expr: >
+          ((windows_logical_disk_free_bytes{device_role="windows", volume=~"[A-Z]:"} / (windows_logical_disk_size_bytes{device_role="windows", volume=~"[A-Z]:"} > 0)) * 100) < 15
+          and
+          ((windows_logical_disk_free_bytes{device_role="windows", volume=~"[A-Z]:"} / (windows_logical_disk_size_bytes{device_role="windows", volume=~"[A-Z]:"} > 0)) * 100) >= 5
+        for: 10m
+        labels:
+          severity: warning
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Laufwerk {{ $labels.volume }} < 15% frei auf {{ $labels.instance }}"
+          description: "Auf Laufwerk {{ $labels.volume }} von Windows-Server {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) sind nur noch {{ printf \"%.1f\" $value }}% Speicherplatz frei."
+
+      - alert: WindowsLogicalDiskLowCritical
+        expr: >
+          ((windows_logical_disk_free_bytes{device_role="windows", volume=~"[A-Z]:"} / (windows_logical_disk_size_bytes{device_role="windows", volume=~"[A-Z]:"} > 0)) * 100) < 5
+        for: 5m
+        labels:
+          severity: critical
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Kritisch: Laufwerk {{ $labels.volume }} < 5% frei auf {{ $labels.instance }}"
+          description: "Akuter Speicherplatzmangel auf Laufwerk {{ $labels.volume }} von Windows-Server {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}): nur noch {{ printf \"%.1f\" $value }}% frei."
+
+  - name: windows.node.services_and_roles
+    interval: 60s
+    rules:
+      - alert: WindowsAutomaticServiceStopped
+        expr: >
+          (windows_service_start_mode{device_role="windows", start_mode="auto", name!~"edgeupdate|gupdate|MapsBroker|sppsvc|RemoteRegistry|ShellHWDetection|WbioSrvc|TrustedInstaller|clr_optimization.*|CDPSvc|OneSyncSvc.*|tiledatamodelsvc"} == 1)
+          and on (customer, site, instance, name)
+          (windows_service_state{device_role="windows", state="stopped"} == 1)
+        for: 5m
+        labels:
+          severity: warning
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Windows-Auto-Dienst '{{ $labels.name }}' gestoppt ({{ $labels.instance }})"
+          description: "Der auf automatischen Start gesetzte Windows-Dienst '{{ $labels.name }}' ist auf {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) gestoppt."
+
+      - alert: WindowsActiveDirectoryUnhealthy
+        expr: >
+          (windows_service_state{device_role="windows", name="NTDS", state!="running"} == 1)
+          or
+          (windows_ad_replication_pending_synchronizations{device_role="windows"} > 50)
+          or
+          (increase(windows_ad_replication_sync_requests_schema_mismatch_failure_total{device_role="windows"}[15m]) > 0)
+        for: 5m
+        labels:
+          severity: critical
+          category: security
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Active Directory / NTDS Problem auf {{ $labels.instance }}"
+          description: "Domain Controller {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) meldet einen gestoppten NTDS-Dienst oder gestörte AD-Replikation."
+
+      - alert: WindowsDnsServerDegraded
+        expr: >
+          (windows_service_state{device_role="windows", name="DNS", state!="running"} == 1)
+          or
+          (rate(windows_dns_zone_transfer_failures_total{device_role="windows"}[15m]) > 0)
+        for: 5m
+        labels:
+          severity: critical
+          category: network
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Windows DNS-Server gestört auf {{ $labels.instance }}"
+          description: "Auf Windows-DNS-Server {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) ist der DNS-Dienst gestoppt oder Zonentransfers schlagen fehl."
+
+      - alert: WindowsSmbServerUnhealthy
+        expr: >
+          (windows_service_state{device_role="windows", name="LanmanServer", state!="running"} == 1)
+          or
+          (windows_smb_server_current_open_files{device_role="windows"} > 50000)
+        for: 5m
+        labels:
+          severity: critical
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Windows SMB-Dateiserver-Problem auf {{ $labels.instance }}"
+          description: "Auf Windows-Server {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) ist der Dienst 'LanmanServer' (SMB) ausgefallen oder das Handle-Limit wird erreicht."

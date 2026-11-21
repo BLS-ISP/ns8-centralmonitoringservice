@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""Start, enable, or reload systemd user units for central-monitoring-collector."""
+
+from __future__ import annotations
+
+import os
+import shutil
+import sys
+from pathlib import Path
+
+PYPKG = Path(__file__).resolve().parents[2] / "pypkg"
+if str(PYPKG) not in sys.path:
+    sys.path.insert(0, str(PYPKG))
+
+import agent  # type: ignore[import-not-found]
+from collector_lib.alloy_renderer import has_enabled_proxmox_targets
+from collector_lib.ns8_metrics import collect_and_write_ns8_metrics
+from collector_lib.runtime import get_state_dir
+from collector_lib.targets_store import TargetsStore
+
+
+def _systemctl(*args: str) -> None:
+    if shutil.which("systemctl") and os.name != "nt":
+        agent.run_helper("systemctl", "--user", *args)
+
+
+def main() -> int:
+    state_dir = get_state_dir()
+    collect_local = os.environ.get("COLLECT_LOCAL_NS8", "1") == "1"
+    pod_recreate = os.environ.get("POD_RECREATE_NEEDED", "0") == "1"
+
+    if collect_local:
+        collect_and_write_ns8_metrics(state_dir)
+        _systemctl("enable", "--now", "ns8-collector-textfile.timer")
+    else:
+        _systemctl("disable", "--now", "ns8-collector-textfile.timer")
+
+    _systemctl("daemon-reload")
+    _systemctl("enable", "central-monitoring-collector.service")
+    if pod_recreate:
+        _systemctl("restart", "central-monitoring-collector.service")
+    else:
+        _systemctl("start", "central-monitoring-collector.service")
+
+    targets = TargetsStore(state_dir).load_all()
+    if has_enabled_proxmox_targets(targets):
+        _systemctl("enable", "pve-exporter.service")
+        _systemctl("restart", "pve-exporter.service")
+    else:
+        _systemctl("disable", "--now", "pve-exporter.service")
+
+    _systemctl("enable", "alloy.service")
+    _systemctl("restart", "alloy.service")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

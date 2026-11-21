@@ -1,0 +1,49 @@
+# NS8 Central Monitoring Service — Multi-Tenant Auth & Telemetry Stamping Gateway
+FROM docker.io/library/python:3.12-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc g++ libsnappy-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r /tmp/requirements.txt python-snappy
+
+FROM docker.io/library/python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:${PATH}" \
+    PYTHONPATH="/app" \
+    HUB_STATE_DIR="/state" \
+    GATEWAY_LISTEN_HOST="0.0.0.0" \
+    GATEWAY_LISTEN_PORT="8080" \
+    RELAY_LISTEN_HOST="127.0.0.1" \
+    RELAY_LISTEN_PORT="9097"
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libsnappy1v5 ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    groupadd -g 10001 gateway && \
+    useradd -u 10001 -g 10001 -d /app -s /usr/sbin/nologin -M gateway
+
+COPY --from=builder /opt/venv /opt/venv
+WORKDIR /app
+COPY hub_gateway /app/hub_gateway
+
+RUN find /app -name "__pycache__" -type d -exec rm -rf {} + && \
+    find /app -name "*.pyc" -delete && \
+    find /app -type f -exec sed -i 's/\r$//' {} + && \
+    chown -R 10001:0 /app && \
+    chmod -R g=u /app
+
+USER 10001
+EXPOSE 8080
+
+ENTRYPOINT ["python", "-m", "hub_gateway.app"]

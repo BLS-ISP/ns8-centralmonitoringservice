@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-save-tenant-output.json",
+  "title": "central-monitoring-hub save-tenant output",
+  "type": "object",
+  "required": ["status", "customer", "created", "token_prefix", "auth_token", "grafana_org_id"],
+  "additionalProperties": false,
+  "properties": {
+    "status": { "type": "string", "enum": ["ok"] },
+    "customer": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$"
+    },
+    "created": { "type": "boolean" },
+    "token_prefix": { "type": "string" },
+    "auth_token": {
+      "type": ["string", "null"],
+      "description": "Plaintext bearer token returned ONLY upon initial creation; null on updates (use rotate-token to issue a new secret)."
+    },
+    "grafana_org_id": { "type": ["integer", "null"] }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-generate-agent-bundle-output.json",
+  "title": "central-monitoring-hub generate-agent-bundle output",
+  "type": "object",
+  "required": [
+    "status",
+    "customer",
+    "site",
+    "platform",
+    "collector_id",
+    "hub_url",
+    "token_prefix",
+    "config_filename",
+    "config_content",
+    "installer_filename",
+    "installer_content",
+    "instructions"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "status": { "type": "string", "enum": ["ok"] },
+    "customer": { "type": "string" },
+    "site": { "type": "string" },
+    "platform": { "type": "string", "enum": ["linux", "windows", "docker"] },
+    "collector_id": { "type": "string" },
+    "hub_url": { "type": "string" },
+    "token_prefix": { "type": "string" },
+    "config_filename": { "type": "string" },
+    "config_content": { "type": "string", "minLength": 20 },
+    "installer_filename": { "type": "string" },
+    "installer_content": { "type": "string", "minLength": 20 },
+    "instructions": { "type": "string" }
+  }
+}

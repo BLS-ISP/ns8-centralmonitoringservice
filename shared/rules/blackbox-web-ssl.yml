@@ -1,0 +1,95 @@
+# NS8 Central Monitoring Service — Blackbox Web, TLS Certificate, DNS & TCP Alert Rules
+# Capability: telemetry-contract (shared/rules/blackbox-web-ssl.yml)
+
+groups:
+  - name: blackbox.web_ssl_dns_tcp
+    interval: 30s
+    rules:
+      - alert: BlackboxWebEndpointDown
+        expr: probe_success{module!~"dns.*|tcp.*|icmp.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          category: web
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Website/Endpunkt nicht erreichbar ({{ $labels.instance }})"
+          description: "Die HTTP/HTTPS-Prüfung für {{ $labels.instance }} (Mandant: {{ $labels.customer }}, Standort: {{ $labels.site }}) schlägt seit über 2 Minuten fehl (probe_success == 0)."
+
+      - alert: BlackboxHttpServerError5xx
+        expr: probe_http_status_code >= 500
+        for: 2m
+        labels:
+          severity: critical
+          category: web
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] HTTP 5xx Serverfehler auf {{ $labels.instance }}"
+          description: "Endpunkt {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) antwortet mit HTTP-Statuscode {{ printf \"%.0f\" $value }}."
+
+      - alert: BlackboxHttpClientError4xx
+        expr: (probe_http_status_code >= 400) and (probe_http_status_code < 500)
+        for: 5m
+        labels:
+          severity: warning
+          category: web
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] HTTP 4xx Fehlerstatus auf {{ $labels.instance }}"
+          description: "Endpunkt {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) liefert seit 5 Minuten HTTP-Statuscode {{ printf \"%.0f\" $value }}."
+
+      - alert: BlackboxSlowHttpResponse
+        expr: >
+          (probe_duration_seconds{module!~"dns.*|tcp.*|icmp.*"} > 3)
+          and
+          (probe_success == 1)
+        for: 5m
+        labels:
+          severity: warning
+          category: web
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Langsame Web-Antwortzeit (>3s) bei {{ $labels.instance }}"
+          description: "Die HTTP/HTTPS-Antwortzeit von {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) beträgt {{ printf \"%.2f\" $value }} Sekunden (> 3,0s)."
+
+      - alert: BlackboxTlsCertificateExpiringWarning
+        expr: >
+          (((probe_ssl_earliest_cert_expiry - time()) / 86400) < 21)
+          and
+          (((probe_ssl_earliest_cert_expiry - time()) / 86400) >= 7)
+        for: 15m
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] TLS-Zertifikat läuft in <21 Tagen ab ({{ $labels.instance }})"
+          description: "Das TLS/SSL-Zertifikat für {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) läuft in {{ printf \"%.1f\" $value }} Tagen ab."
+
+      - alert: BlackboxTlsCertificateExpiringCritical
+        expr: ((probe_ssl_earliest_cert_expiry - time()) / 86400) < 7
+        for: 5m
+        labels:
+          severity: critical
+          category: security
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Kritisch: TLS-Zertifikat läuft in <7 Tagen ab ({{ $labels.instance }})"
+          description: "Das TLS/SSL-Zertifikat für {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) läuft in {{ printf \"%.1f\" $value }} Tagen ab (oder ist bereits abgelaufen)."
+
+      - alert: BlackboxDnsResolutionFailed
+        expr: >
+          (probe_success{module=~"dns.*"} == 0)
+          or
+          (probe_dns_query_succeeded == 0)
+        for: 2m
+        labels:
+          severity: critical
+          category: network
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] DNS-Auflösung fehlgeschlagen ({{ $labels.instance }})"
+          description: "Die DNS-Prüfung für {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) konnte den Zielnamen nicht auflösen."
+
+      - alert: BlackboxTcpPortProbeFailed
+        expr: probe_success{module=~"tcp.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          category: network
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] TCP-Port nicht erreichbar ({{ $labels.instance }})"
+          description: "Die TCP-Portprüfung für {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}, Modul: {{ $labels.module }}) ist seit über 2 Minuten fehlgeschlagen."

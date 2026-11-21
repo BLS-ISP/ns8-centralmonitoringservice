@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""Return customer LAN scrape targets with secrets redacted."""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+PYPKG = Path(__file__).resolve().parents[2] / "pypkg"
+if str(PYPKG) not in sys.path:
+    sys.path.insert(0, str(PYPKG))
+
+from collector_lib.runtime import get_state_dir
+from collector_lib.targets_store import TargetsStore
+
+
+def main() -> int:
+    raw_in = sys.stdin.read().strip()
+    payload = json.loads(raw_in) if raw_in else {}
+    target_type = str(payload.get("target_type") or "").strip()
+
+    state_dir = get_state_dir()
+    targets = TargetsStore(state_dir).list_public_targets(target_type=target_type)
+    json.dump({"targets": targets}, sys.stdout)
+    sys.stdout.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

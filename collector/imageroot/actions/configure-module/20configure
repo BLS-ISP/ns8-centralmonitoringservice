@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Configure central-monitoring-collector settings, persist secrets, and render config.alloy."""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+PYPKG = Path(__file__).resolve().parents[2] / "pypkg"
+if str(PYPKG) not in sys.path:
+    sys.path.insert(0, str(PYPKG))
+
+import agent  # type: ignore[import-not-found]
+from collector_lib.alloy_renderer import CollectorConfig, render_collector_artifacts
+from collector_lib.runtime import (
+    build_collector_id,
+    get_state_dir,
+    load_stored_auth_token,
+    save_stored_auth_token,
+    sync_syslog_firewall_ports,
+    validate_auth_token_format,
+)
+from collector_lib.targets_store import TargetsStore
+
+
+def _fail_validation(field: str, error_code: str, value: str = "") -> int:
+    agent.set_status("validation-failed")
+    json.dump(
+        [{"field": field, "parameter": field, "value": value, "error": error_code}],
+        sys.stdout,
+    )
+    sys.stdout.write("\n")
+    return 2
+
+
+def main() -> int:
+    raw_in = sys.stdin.read().strip()
+    payload = json.loads(raw_in) if raw_in else {}
+    state_dir = get_state_dir()
+
+    hub_url = str(payload["hub_url"]).strip().rstrip("/")
+    customer = str(payload["customer"]).strip()
+    site = str(payload["site"]).strip()
+    auth_token_unchanged = bool(payload.get("auth_token_unchanged", False))
+    raw_token = str(payload.get("auth_token") or "")
+
+    try:
+        provided_token = validate_auth_token_format(raw_token)
+    except ValueError:
+        return _fail_validation("auth_token", "invalid_auth_token")
+
+    if auth_token_unchanged and not provided_token:
+        auth_token = load_stored_auth_token(state_dir)
+        if not auth_token:
+            return _fail_validation("auth_token", "auth_token_required")
+    else:
+        auth_token = provided_token
+        if len(auth_token) < 16:
+            return _fail_validation("auth_token", "auth_token_too_short")
+
+    module_id = os.environ.get("MODULE_ID", "central-monitoring-collector1")
+    requested_cid = str(payload.get("collector_id") or "").strip()
+    existing_cid = os.environ.get("COLLECTOR_ID", "").strip()
+    was_configured = os.environ.get("CONFIGURED", "0") == "1"
+
+    if requested_cid:
+        collector_id = requested_cid
+    elif was_configured and existing_cid:
+        collector_id = existing_cid
+    else:
+        collector_id = build_collector_id(customer=customer, site=site, module_id=module_id)
+
+    collect_local_ns8 = bool(payload.get("collect_local_ns8", True))
+    enable_syslog = bool(payload.get("enable_syslog_receiver", False))
+    syslog_port = int(payload.get("syslog_port", 5514))
+    wal_max_disk_mb = int(payload.get("wal_max_disk_mb", 2048))
+    tls_skip_verify = bool(payload.get("tls_skip_verify", False))
+
+    prev_syslog_enabled = os.environ.get("ENABLE_SYSLOG_RECEIVER", "0") == "1"
+    prev_syslog_port = int(os.environ.get("SYSLOG_PORT", "5514") or 5514)
+    pod_recreate = (
+        "1" if (prev_syslog_enabled != enable_syslog or prev_syslog_port != syslog_port) else "0"
+    )
+
+    syslog_args = (
+        f"-p {syslog_port}:5514/udp -p {syslog_port}:5514/tcp" if enable_syslog else ""
+    )
+
+    save_stored_auth_token(state_dir, auth_token)
+    sync_syslog_firewall_ports(
+        enable=enable_syslog,
+        port=syslog_port,
+        previous_enabled=prev_syslog_enabled,
+        previous_port=prev_syslog_port,
+        runner=getattr(agent, "run_helper", None),
+    )
+
+    env_updates = {
+        "CONFIGURED": "1",
+        "HUB_URL": hub_url,
+        "CUSTOMER": customer,
+        "SITE": site,
+        "COLLECTOR_ID": collector_id,
+        "COLLECT_LOCAL_NS8": "1" if collect_local_ns8 else "0",
+        "ENABLE_SYSLOG_RECEIVER": "1" if enable_syslog else "0",
+        "SYSLOG_PORT": str(syslog_port),
+        "WAL_MAX_DISK_MB": str(wal_max_disk_mb),
+        "TLS_SKIP_VERIFY": "1" if tls_skip_verify else "0",
+        "PODMAN_SYSLOG_ARGS": syslog_args,
+        "POD_RECREATE_NEEDED": pod_recreate,
+    }
+    for key, val in env_updates.items():
+        agent.set_env(key, val)
+    agent.dump_env()
+
+    cfg = CollectorConfig(
+        configured=True,
+        hub_url=hub_url,
+        auth_token=auth_token,
+        customer=customer,
+        site=site,
+        collector_id=collector_id,
+        collect_local_ns8=collect_local_ns8,
+        enable_syslog_receiver=enable_syslog,
+        syslog_port=syslog_port,
+        wal_max_disk_mb=wal_max_disk_mb,
+        tls_skip_verify=tls_skip_verify,
+    )
+    targets = TargetsStore(state_dir).load_all()
+    render_collector_artifacts(state_dir, cfg, targets)
+
+    json.dump({"status": "ok", "collector_id": collector_id}, sys.stdout)
+    sys.stdout.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

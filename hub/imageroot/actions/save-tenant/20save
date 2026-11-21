@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import sys
+
+for _candidate in (
+    Path(__file__).resolve().parents[2] / "pypkg",
+    Path("/imageroot/pypkg"),
+):
+    if _candidate.is_dir() and str(_candidate) not in sys.path:
+        sys.path.append(str(_candidate))
+
+from hub_tenancy.grafana_sync import sync_all_orgs_if_running  # noqa: E402
+from hub_tenancy.store import load_tenants_raw, resolve_state_dir, save_tenant  # noqa: E402
+
+
+def _fail_validation(field: str, value: object, error_code: str) -> None:
+    try:
+        import agent  # type: ignore[import-not-found]
+
+        agent.set_status("validation-failed")
+    except ImportError:
+        pass
+    json.dump(
+        [{"field": field, "parameter": field, "value": value, "error": error_code}],
+        sys.stdout,
+    )
+    sys.stdout.write("\n")
+    sys.exit(2)
+
+
+def main() -> None:
+    raw_in = sys.stdin.read().strip()
+    request = json.loads(raw_in) if raw_in else {}
+    state_dir = resolve_state_dir()
+
+    try:
+        rec, auth_token = save_tenant(state_dir, request)
+    except ValueError as exc:
+        _fail_validation("customer", request.get("customer", ""), str(exc))
+        return
+
+    sync_all_orgs_if_running(state_dir, os.environ)
+
+    try:
+        from hub_alerting.alertmanager_config import sync_alertmanager
+
+        sync_alertmanager(state_dir)
+    except ImportError:
+        pass
+
+    refreshed = next(
+        (t for t in load_tenants_raw(state_dir) if t.get("customer") == rec["customer"]),
+        rec,
+    )
+    output = {
+        "status": "ok",
+        "customer": refreshed["customer"],
+        "created": auth_token is not None,
+        "token_prefix": refreshed["token_prefix"],
+        "auth_token": auth_token,
+        "grafana_org_id": refreshed.get("grafana_org_id"),
+    }
+    json.dump(output, sys.stdout)
+    sys.stdout.write("\n")
+
+
+if __name__ == "__main__":
+    main()

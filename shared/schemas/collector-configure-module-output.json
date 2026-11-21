@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/collector-configure-module-output.json",
+  "title": "central-monitoring-collector configure-module output",
+  "type": "object",
+  "required": ["status", "collector_id"],
+  "additionalProperties": false,
+  "properties": {
+    "status": { "type": "string", "enum": ["ok"] },
+    "collector_id": { "type": "string", "minLength": 3 }
+  }
+}

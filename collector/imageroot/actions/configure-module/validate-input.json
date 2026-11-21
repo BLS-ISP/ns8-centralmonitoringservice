@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/collector-configure-module-input.json",
+  "title": "central-monitoring-collector configure-module input",
+  "description": "Configures the lightweight Grafana Alloy NS8 collector module: Hub HTTPS URL, bearer token, customer/site labels, local NS8 collection, optional unprivileged Syslog listener, and WAL disk buffer.",
+  "type": "object",
+  "required": ["hub_url", "customer", "site"],
+  "additionalProperties": false,
+  "properties": {
+    "hub_url": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 512,
+      "pattern": "^https://[^/\\s]+(/.*)?$",
+      "description": "HTTPS base URL of central-monitoring-hub (e.g. https://monitoring.msp.example.com)."
+    },
+    "auth_token": {
+      "type": "string",
+      "maxLength": 256,
+      "default": "",
+      "description": "Tenant or collector bearer token. Required on first setup; may be empty when auth_token_unchanged is true."
+    },
+    "auth_token_unchanged": {
+      "type": "boolean",
+      "default": false
+    },
+    "customer": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$",
+      "minLength": 3,
+      "maxLength": 48
+    },
+    "site": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,46}[a-z0-9]$",
+      "minLength": 2,
+      "maxLength": 48
+    },
+    "collector_id": {
+      "type": "string",
+      "pattern": "^(|[a-z0-9][a-z0-9._-]{1,62}[a-z0-9])$",
+      "default": ""
+    },
+    "collect_local_ns8": {
+      "type": "boolean",
+      "default": true,
+      "description": "Collect local NS8 host metrics, Restic backup metrics, container status, and systemd journal logs."
+    },
+    "enable_syslog_receiver": {
+      "type": "boolean",
+      "default": false,
+      "description": "Expose an unprivileged UDP/TCP RFC5424/RFC3164 Syslog listener for LAN firewalls, switches, NAS, and UPS appliances."
+    },
+    "syslog_port": {
+      "type": "integer",
+      "minimum": 1024,
+      "maximum": 65535,
+      "default": 5514
+    },
+    "wal_max_disk_mb": {
+      "type": "integer",
+      "minimum": 128,
+      "maximum": 32768,
+      "default": 2048,
+      "description": "Maximum local Write-Ahead-Log disk cap in MiB for offline buffering during WAN outages."
+    },
+    "tls_skip_verify": {
+      "type": "boolean",
+      "default": false,
+      "description": "Allow self-signed TLS certificates on Hub URL (for staging/lab environments only)."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "auth_token_unchanged": { "const": false } }
+      },
+      "then": {
+        "required": ["auth_token"],
+        "properties": {
+          "auth_token": { "minLength": 16 }
+        }
+      }
+    }
+  ]
+}

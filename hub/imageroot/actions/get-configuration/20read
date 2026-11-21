@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""Read Hub configuration (secrets redacted), LDAP domains, and component health."""
+
+import json
+import sys
+from pathlib import Path
+
+_PYPKG = Path(__file__).resolve().parents[2] / "pypkg"
+if str(_PYPKG) not in sys.path:
+    sys.path.insert(0, str(_PYPKG))
+
+from hub_core import resolve_state_dir  # noqa: E402
+from hub_core.overview import build_get_configuration_response  # noqa: E402
+
+
+def main() -> int:
+    response = build_get_configuration_response(resolve_state_dir())
+    json.dump(response, sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

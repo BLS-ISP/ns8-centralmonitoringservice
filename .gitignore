@@ -1,0 +1,42 @@
+# Node / Cockpit UI build artifacts
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.npm/
+npm-debug.log*
+
+# Python bytecode, virtual environments, and test caches
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+**/.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+venv/
+*.egg-info/
+
+# Secrets and local environment overrides
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Generated Software Center catalog and Robot test outputs
+repodata/
+_site/
+test-outputs/
+**/test-outputs/
+
+# Temporary scratch and IDE files
+scratch/
+**/scratch/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

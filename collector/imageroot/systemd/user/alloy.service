@@ -1,0 +1,51 @@
+[Unit]
+Description=Grafana Alloy site telemetry collector
+BindsTo=central-monitoring-collector.service
+After=central-monitoring-collector.service pve-exporter.service
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+Environment=GRAFANA_ALLOY_IMAGE=docker.io/grafana/alloy:v1.4.2
+EnvironmentFile=%E/state/environment
+WorkingDirectory=%E/state
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+TimeoutStopSec=70
+ExecStartPre=/bin/rm -f %t/alloy.pid %t/alloy.ctr-id
+ExecStartPre=/bin/mkdir -p %E/state/secrets %E/state/textfile %E/state/alloy-wal
+ExecStartPre=/bin/sh -c 'if systemctl --user is-active --quiet pve-exporter.service; then i=0; until /usr/bin/podman exec pve-exporter python3 -c "import socket; s=socket.create_connection((\"127.0.0.1\", 9221), 2); s.close()" >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && exit 1; sleep 1; done; fi'
+ExecStart=/usr/bin/podman run \
+    --detach \
+    --conmon-pidfile=%t/alloy.pid \
+    --cidfile=%t/alloy.ctr-id \
+    --cgroups=no-conmon \
+    --pod-id-file=%t/central-monitoring-collector.pod-id \
+    --replace \
+    --pull=missing \
+    --restart=on-failure \
+    --user 0:0 \
+    --group-add=keep-groups \
+    --name=alloy \
+    -v /proc:/host/proc:ro \
+    -v /sys:/host/sys:ro \
+    -v /:/host/root:ro \
+    -v /var/log/journal:/var/log/journal:ro \
+    -v %E/state/config.alloy:/etc/alloy/config.alloy:ro,Z \
+    -v %E/state/secrets:/etc/alloy/secrets:ro,Z \
+    -v %E/state/textfile:/etc/alloy/textfile:ro,Z \
+    -v %E/state/alloy-wal:/var/lib/alloy/data:Z \
+    ${GRAFANA_ALLOY_IMAGE} \
+    run \
+    --server.http.listen-addr=127.0.0.1:12345 \
+    --storage.path=/var/lib/alloy/data \
+    --stability.level=generally-available \
+    /etc/alloy/config.alloy
+ExecReload=/usr/bin/env python3 %h/.config/bin/render-alloy-config --reload-only
+ExecStop=/usr/bin/podman stop --ignore --cidfile %t/alloy.ctr-id -t 15
+ExecStopPost=/usr/bin/podman rm --ignore -f --cidfile %t/alloy.ctr-id
+PIDFile=%t/alloy.pid
+Type=forking
+
+[Install]
+WantedBy=default.target

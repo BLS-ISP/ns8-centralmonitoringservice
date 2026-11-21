@@ -1,0 +1,161 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-save-target-input.json",
+  "title": "central-monitoring-hub save-target input",
+  "description": "Creates or updates a central Prometheus file_sd pull or probe target (ns8-federation, exporter, blackbox, snmp) without restarting Prometheus.",
+  "type": "object",
+  "required": [
+    "name",
+    "enabled",
+    "target_type",
+    "customer",
+    "site",
+    "device_role",
+    "endpoints"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^(|[a-zA-Z0-9_-]{3,64})$",
+      "default": "",
+      "description": "Empty string creates a new target with server-generated ID; existing ID updates in place."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "target_type": {
+      "type": "string",
+      "enum": ["ns8-federation", "exporter", "blackbox", "snmp"]
+    },
+    "customer": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$"
+    },
+    "site": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,46}[a-z0-9]$"
+    },
+    "device_role": {
+      "type": "string",
+      "enum": [
+        "ns8",
+        "linux",
+        "windows",
+        "proxmox",
+        "web",
+        "snmp-network",
+        "snmp-ups",
+        "snmp-nas",
+        "snmp-firewall",
+        "snmp-printer"
+      ]
+    },
+    "scrape_interval": {
+      "type": "string",
+      "pattern": "^(10|15|30|60|120|300)s$",
+      "default": "30s"
+    },
+    "endpoints": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 512
+      },
+      "description": "Target URLs, host:port pairs, or IP/hostnames depending on target_type."
+    },
+    "scheme": {
+      "type": "string",
+      "enum": ["http", "https"],
+      "default": "https"
+    },
+    "metrics_path": {
+      "type": "string",
+      "default": "/metrics",
+      "pattern": "^/[^\\s]*$"
+    },
+    "tls_skip_verify": {
+      "type": "boolean",
+      "default": false
+    },
+    "basic_auth_user": {
+      "type": "string",
+      "maxLength": 128,
+      "default": ""
+    },
+    "basic_auth_password": {
+      "type": "string",
+      "maxLength": 256,
+      "default": ""
+    },
+    "bearer_token": {
+      "type": "string",
+      "maxLength": 512,
+      "default": ""
+    },
+    "secret_unchanged": {
+      "type": "boolean",
+      "default": false
+    },
+    "match_selectors": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 3, "maxLength": 256 },
+      "default": ["{__name__=~\"node_.+|ns8_.+|up|restic_.+|systemd_.+\"}"],
+      "description": "Federation match[] selectors when target_type is ns8-federation."
+    },
+    "blackbox_module": {
+      "type": "string",
+      "enum": ["http_2xx", "http_post_2xx", "tcp_connect", "icmp", "dns_tcp", "dns_udp"],
+      "default": "http_2xx"
+    },
+    "snmp_module": {
+      "type": "string",
+      "enum": ["if_mib", "apcupsd", "synology", "qnap", "mikrotik", "fortigate", "printer", "generic"],
+      "default": "if_mib"
+    },
+    "snmp_version": {
+      "type": "string",
+      "enum": ["v2c", "v3"],
+      "default": "v2c"
+    },
+    "snmp_community": {
+      "type": "string",
+      "maxLength": 128,
+      "default": "public"
+    },
+    "snmp_v3": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "username": { "type": "string", "maxLength": 128 },
+        "security_level": {
+          "type": "string",
+          "enum": ["noAuthNoPriv", "authNoPriv", "authPriv"],
+          "default": "authPriv"
+        },
+        "auth_protocol": {
+          "type": "string",
+          "enum": ["MD5", "SHA", "SHA224", "SHA256", "SHA384", "SHA512"],
+          "default": "SHA256"
+        },
+        "auth_password": { "type": "string", "maxLength": 256 },
+        "priv_protocol": {
+          "type": "string",
+          "enum": ["DES", "AES", "AES192", "AES256"],
+          "default": "AES"
+        },
+        "priv_password": { "type": "string", "maxLength": 256 }
+      }
+    }
+  }
+}

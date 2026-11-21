@@ -1,0 +1,40 @@
+[Unit]
+Description=Thanos Query Unified PromQL Endpoint (Central Monitoring Hub)
+BindsTo=central-monitoring-hub.service
+After=central-monitoring-hub.service thanos-sidecar.service thanos-store.service
+Wants=thanos-sidecar.service thanos-store.service
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+EnvironmentFile=-%E/etc/defaults.env
+EnvironmentFile=%E/state/environment
+WorkingDirectory=%E/state
+Restart=always
+RestartSec=5
+TimeoutStopSec=70
+ExecStartPre=/bin/rm -f %t/%N.pid %t/%N.cid
+ExecStart=/usr/bin/podman run \
+    --conmon-pidfile %t/%N.pid \
+    --cidfile %t/%N.cid \
+    --cgroups=no-conmon \
+    --pod-id-file %t/central-monitoring-hub.pod-id \
+    --replace -d --name thanos-query \
+    --pull=missing \
+    --restart=on-failure \
+    --sdnotify=conmon \
+    --user 0:0 \
+    ${THANOS_IMAGE} \
+    query \
+    --http-address=127.0.0.1:10902 \
+    --grpc-address=127.0.0.1:10901 \
+    --query.replica-label=prometheus_replica \
+    --endpoint=127.0.0.1:10911 \
+    --endpoint=127.0.0.1:10921
+ExecStop=/usr/bin/podman stop --ignore --cidfile %t/%N.cid -t 10
+ExecStopPost=/usr/bin/podman rm --ignore -f --cidfile %t/%N.cid
+PIDFile=%t/%N.pid
+Type=notify
+NotifyAccess=all
+
+[Install]
+WantedBy=default.target

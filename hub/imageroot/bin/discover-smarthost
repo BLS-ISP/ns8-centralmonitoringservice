@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+"""Discover NS8 cluster/smarthost settings from Redis and write state/smarthost.env."""
+
+import sys
+from pathlib import Path
+
+_PYPKG = Path(__file__).resolve().parents[1] / "pypkg"
+if str(_PYPKG) not in sys.path:
+    sys.path.insert(0, str(_PYPKG))
+
+from hub_core import resolve_state_dir  # noqa: E402
+from hub_core.env_store import discover_smarthost  # noqa: E402
+
+
+def main() -> int:
+    discover_smarthost(resolve_state_dir())
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

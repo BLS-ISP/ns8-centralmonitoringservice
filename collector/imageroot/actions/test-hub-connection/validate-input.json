@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/collector-test-hub-connection-input.json",
+  "title": "central-monitoring-collector test-hub-connection input",
+  "description": "Tests HTTPS connectivity and bearer token authentication against central-monitoring-hub before or after saving configuration.",
+  "type": "object",
+  "required": ["hub_url"],
+  "additionalProperties": false,
+  "properties": {
+    "hub_url": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 512,
+      "pattern": "^https://[^/\\s]+(/.*)?$"
+    },
+    "auth_token": {
+      "type": "string",
+      "maxLength": 256,
+      "default": "",
+      "description": "Bearer token to test; when empty, falls back to the stored module token."
+    },
+    "tls_skip_verify": {
+      "type": "boolean",
+      "default": false
+    }
+  }
+}

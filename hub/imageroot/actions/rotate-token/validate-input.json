@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-rotate-token-input.json",
+  "title": "central-monitoring-hub rotate-token input",
+  "type": "object",
+  "required": ["customer"],
+  "additionalProperties": false,
+  "properties": {
+    "customer": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$"
+    },
+    "grace_period_minutes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10080,
+      "default": 60,
+      "description": "Minutes the old token stays accepted during collector rollover (0 revokes old token immediately)."
+    }
+  }
+}

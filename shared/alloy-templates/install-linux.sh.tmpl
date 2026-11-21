@@ -1,0 +1,249 @@
+#!/usr/bin/env bash
+# ============================================================================
+# NS8 Central Monitoring Service — Idempotent Linux Grafana Alloy Installer
+# Template: shared/alloy-templates/install-linux.sh.tmpl
+# Supports: Debian 11/12+, Ubuntu 20.04/22.04/24.04+, RHEL/Rocky/AlmaLinux 8/9+
+# Tenant:   {{CUSTOMER}} | Site: {{SITE}} | Collector: {{COLLECTOR_ID}}
+# ============================================================================
+set -euo pipefail
+
+HUB_URL="{{HUB_URL}}"
+AUTH_TOKEN="{{AUTH_TOKEN}}"
+CUSTOMER="{{CUSTOMER}}"
+SITE="{{SITE}}"
+COLLECTOR_ID="{{COLLECTOR_ID}}"
+
+CONFIG_PATH="/etc/alloy/config.alloy"
+WAL_DIR="/var/lib/alloy/data"
+TEXTFILE_DIR="/var/lib/alloy/textfile"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "[ERROR] Please run this installer as root (e.g. sudo bash install-linux.sh)." >&2
+  exit 1
+fi
+
+if [[ ! -f /etc/os-release ]]; then
+  echo "[ERROR] Cannot detect Linux distribution (/etc/os-release missing)." >&2
+  exit 1
+fi
+
+# shellcheck source=/dev/null
+source /etc/os-release
+
+echo "[1/4] Detecting Linux distribution (${ID:-unknown} ${VERSION_ID:-}) and configuring Grafana repository..."
+
+install_debian_ubuntu() {
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y -qq apt-transport-https ca-certificates curl gpg
+
+  install -d -m 0755 /etc/apt/keyrings
+  if [[ ! -s /etc/apt/keyrings/grafana.gpg ]]; then
+    curl -fsSL https://apt.grafana.com/gpg.key | gpg --dearmor -o /etc/apt/keyrings/grafana.gpg
+    chmod 0644 /etc/apt/keyrings/grafana.gpg
+  fi
+
+  cat <<'REPO' > /etc/apt/sources.list.d/grafana.list
+deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main
+REPO
+
+  apt-get update -qq
+  apt-get install -y -qq alloy
+}
+
+install_rhel_rocky() {
+  cat <<'REPO' > /etc/yum.repos.d/grafana.repo
+[grafana]
+name=grafana
+baseurl=https://rpm.grafana.com
+repo_gpgcheck=1
+enabled=1
+gpgcheck=1
+gpgkey=https://rpm.grafana.com/gpg.key
+sslverify=1
+sslcacert=/etc/pki/tls/certs/ca-bundle.crt
+REPO
+
+  if command -v dnf >/dev/null 2>&1; then
+    dnf install -y -q alloy
+  else
+    yum install -y -q alloy
+  fi
+}
+
+case "${ID:-}" in
+  debian|ubuntu|linuxmint|pop)
+    install_debian_ubuntu
+    ;;
+  rhel|rocky|almalinux|centos|ol|fedora)
+    install_rhel_rocky
+    ;;
+  *)
+    if [[ "${ID_LIKE:-}" == *"debian"* ]]; then
+      install_debian_ubuntu
+    elif [[ "${ID_LIKE:-}" == *"rhel"* || "${ID_LIKE:-}" == *"fedora"* ]]; then
+      install_rhel_rocky
+    else
+      echo "[ERROR] Unsupported Linux distribution: ${ID:-unknown}" >&2
+      exit 1
+    fi
+    ;;
+esac
+
+echo "[2/4] Preparing Alloy directories and journald permissions..."
+install -d -m 0750 "${WAL_DIR}" "${TEXTFILE_DIR}" /etc/alloy
+
+ALLOY_GROUP="root"
+if id -u alloy >/dev/null 2>&1; then
+  ALLOY_GROUP="alloy"
+  chown -R alloy:alloy "${WAL_DIR}" "${TEXTFILE_DIR}"
+  chown root:alloy /etc/alloy
+  getent group systemd-journal >/dev/null 2>&1 && usermod -aG systemd-journal alloy || true
+  getent group adm >/dev/null 2>&1 && usermod -aG adm alloy || true
+fi
+
+echo "[3/4] Writing Grafana Alloy configuration to ${CONFIG_PATH} (umask 0077 atomic write)..."
+if [[ -f "${CONFIG_PATH}" ]]; then
+  install -m 0600 -o root -g root "${CONFIG_PATH}" "${CONFIG_PATH}.bak.$(date +%Y%m%d%H%M%S)"
+fi
+
+TMP_CONFIG="${CONFIG_PATH}.tmp.$$"
+(
+  umask 0077
+  if [[ -f "${SCRIPT_DIR}/config.alloy" ]]; then
+    install -m 0640 -o root -g "${ALLOY_GROUP}" "${SCRIPT_DIR}/config.alloy" "${TMP_CONFIG}"
+  elif [[ -f "${SCRIPT_DIR}/config-linux.alloy" ]]; then
+    install -m 0640 -o root -g "${ALLOY_GROUP}" "${SCRIPT_DIR}/config-linux.alloy" "${TMP_CONFIG}"
+  else
+    install -m 0640 -o root -g "${ALLOY_GROUP}" /dev/null "${TMP_CONFIG}"
+    cat <<EOF > "${TMP_CONFIG}"
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+prometheus.exporter.unix "local_host" {
+  enable_collectors = ["systemd", "processes"]
+  textfile {
+    directory = "${TEXTFILE_DIR}"
+  }
+}
+
+discovery.relabel "linux_host" {
+  targets = prometheus.exporter.unix.local_host.targets
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+  rule {
+    target_label = "customer"
+    replacement  = "${CUSTOMER}"
+  }
+  rule {
+    target_label = "site"
+    replacement  = "${SITE}"
+  }
+  rule {
+    target_label = "device_role"
+    replacement  = "linux"
+  }
+  rule {
+    target_label = "collector_id"
+    replacement  = "${COLLECTOR_ID}"
+  }
+}
+
+prometheus.scrape "linux_host" {
+  targets         = discovery.relabel.linux_host.output
+  job_name        = "node_exporter"
+  scrape_interval = "30s"
+  scrape_timeout  = "10s"
+  forward_to      = [prometheus.remote_write.hub.receiver]
+}
+
+discovery.relabel "journal_labels" {
+  targets = []
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "level"
+  }
+}
+
+loki.source.journal "systemd_journal" {
+  max_age       = "12h"
+  relabel_rules = discovery.relabel.journal_labels.rules
+  labels = {
+    customer     = "${CUSTOMER}",
+    site         = "${SITE}",
+    device_role  = "linux",
+    collector_id = "${COLLECTOR_ID}",
+    job          = "systemd-journal",
+  }
+  forward_to = [loki.process.linux_logs.receiver]
+}
+
+loki.process "linux_logs" {
+  stage.static_labels {
+    values = {
+      instance = constants.hostname,
+    }
+  }
+  forward_to = [loki.write.hub.receiver]
+}
+
+prometheus.remote_write "hub" {
+  external_labels = {
+    customer     = "${CUSTOMER}",
+    site         = "${SITE}",
+    device_role  = "linux",
+    collector_id = "${COLLECTOR_ID}",
+  }
+  endpoint {
+    url          = "${HUB_URL}/api/v1/write"
+    bearer_token = "${AUTH_TOKEN}"
+  }
+  wal {
+    truncate_frequency = "2h"
+  }
+}
+
+loki.write "hub" {
+  external_labels = {
+    customer     = "${CUSTOMER}",
+    site         = "${SITE}",
+    collector_id = "${COLLECTOR_ID}",
+  }
+  endpoint {
+    url                 = "${HUB_URL}/loki/api/v1/push"
+    bearer_token        = "${AUTH_TOKEN}"
+    min_backoff_period  = "500ms"
+    max_backoff_period  = "5m"
+    max_backoff_retries = 0
+  }
+  wal {
+    enabled         = true
+    max_segment_age = "2h"
+  }
+}
+EOF
+  fi
+)
+mv -f "${TMP_CONFIG}" "${CONFIG_PATH}"
+
+echo "[4/4] Enabling and restarting alloy.service..."
+systemctl daemon-reload
+systemctl enable alloy >/dev/null
+systemctl restart alloy
+
+sleep 2
+if systemctl is-active --quiet alloy; then
+  echo "[OK] Grafana Alloy is running and streaming metrics & logs to ${HUB_URL} (customer=${CUSTOMER}, site=${SITE})."
+else
+  echo "[ERROR] alloy.service failed to start. Check: journalctl -u alloy -n 50 --no-pager" >&2
+  exit 1
+fi

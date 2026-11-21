@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Regenerate instance secrets, avoid Traefik FQDN collision, and start cloned Hub pod."""
+
+import json
+import sys
+from pathlib import Path
+
+_IMAGEROOT = Path(__file__).resolve().parents[2]
+_PYPKG = _IMAGEROOT / "pypkg"
+if str(_PYPKG) not in sys.path:
+    sys.path.insert(0, str(_PYPKG))
+
+from hub_core import (  # noqa: E402
+    CORE_CONTAINER_SERVICES,
+    POD_SERVICE,
+    THANOS_SERVICES,
+    resolve_state_dir,
+)
+from hub_core.backup_state import cleanup_state, restore_state  # noqa: E402
+from hub_core.config_renderer import render_all_configs  # noqa: E402
+from hub_core.env_store import (  # noqa: E402
+    discover_smarthost,
+    read_module_env,
+    regenerate_clone_secrets,
+)
+
+
+def main() -> int:
+    import agent
+
+    try:
+        request = json.load(sys.stdin)
+    except Exception:
+        request = {}
+
+    state_dir = resolve_state_dir()
+    regenerate_clone_secrets(state_dir)
+    restore_state(state_dir)
+
+    env = read_module_env(state_dir)
+    requested_host = str(request.get("host", "")).strip().lower() if isinstance(request, dict) else ""
+    candidate_host = requested_host or env.get("TRAEFIK_HOST", "").strip().lower()
+
+    if candidate_host and agent.http_route_in_use(domain=candidate_host):
+        # Clear colliding route so cloned instance never hijacks source production FQDN
+        agent.set_env("TRAEFIK_HOST", "")
+        agent.set_env("CONFIGURED", "false")
+        candidate_host = ""
+    elif candidate_host:
+        agent.set_env("TRAEFIK_HOST", candidate_host)
+
+    # NS8 Rule #2: Always call agent.dump_env() after set_env()
+    agent.dump_env()
+    env = read_module_env(state_dir)
+
+    discover_smarthost(state_dir)
+    render_all_configs(state_dir)
+
+    try:
+        from hub_tenancy.ldap_sync import sync_ldap_config
+
+        sync_ldap_config(state_dir, env)
+    except ImportError:
+        pass
+
+    try:
+        from hub_alerting.alertmanager_config import sync_alertmanager
+
+        sync_alertmanager(state_dir)
+    except ImportError:
+        pass
+
+    if candidate_host:
+        traefik_id = agent.resolve_agent_id("traefik@node")
+        agent.tasks.run(
+            agent_id=traefik_id,
+            action="set-route",
+            data={
+                "instance": env.get("MODULE_ID", "central-monitoring-hub1"),
+                "url": f"http://127.0.0.1:{env.get('TCP_PORT', '20080')}",
+                "host": candidate_host,
+                "lets_encrypt": env.get("TRAEFIK_LETS_ENCRYPT", "true").lower() == "true",
+                "http2https": env.get("TRAEFIK_HTTP2HTTPS", "true").lower() == "true",
+            },
+        )
+        storage_mode = env.get("STORAGE_MODE", "local")
+        agent.run_helper("systemctl", "--user", "daemon-reload")
+        agent.run_helper("systemctl", "--user", "enable", POD_SERVICE, *CORE_CONTAINER_SERVICES)
+        agent.run_helper("systemctl", "--user", "restart", POD_SERVICE)
+        for unit in CORE_CONTAINER_SERVICES:
+            agent.run_helper("systemctl", "--user", "restart", unit)
+        if storage_mode == "s3":
+            agent.run_helper("systemctl", "--user", "enable", *THANOS_SERVICES)
+            for t_unit in THANOS_SERVICES:
+                agent.run_helper("systemctl", "--user", "restart", t_unit)
+
+    try:
+        from hub_tenancy.grafana_sync import sync_all_orgs_if_running
+
+        sync_all_orgs_if_running(state_dir, env)
+    except ImportError:
+        pass
+
+    cleanup_state(state_dir)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

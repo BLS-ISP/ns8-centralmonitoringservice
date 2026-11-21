@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/collector-get-configuration-output.json",
+  "title": "central-monitoring-collector get-configuration output",
+  "description": "Returns Collector settings (with bearer token redacted) plus Alloy runtime health and WAL buffer usage without overriding NS8's built-in get-status action.",
+  "type": "object",
+  "required": [
+    "configured",
+    "hub_url",
+    "has_auth_token",
+    "auth_token_prefix",
+    "customer",
+    "site",
+    "collector_id",
+    "collect_local_ns8",
+    "enable_syslog_receiver",
+    "syslog_port",
+    "wal_max_disk_mb",
+    "tls_skip_verify",
+    "health"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "configured": { "type": "boolean" },
+    "hub_url": { "type": "string" },
+    "has_auth_token": { "type": "boolean" },
+    "auth_token_prefix": { "type": "string" },
+    "customer": { "type": "string" },
+    "site": { "type": "string" },
+    "collector_id": { "type": "string" },
+    "collect_local_ns8": { "type": "boolean" },
+    "enable_syslog_receiver": { "type": "boolean" },
+    "syslog_port": { "type": "integer", "minimum": 1024, "maximum": 65535 },
+    "wal_max_disk_mb": { "type": "integer", "minimum": 128 },
+    "tls_skip_verify": { "type": "boolean" },
+    "health": {
+      "type": "object",
+      "required": [
+        "alloy_status",
+        "pve_exporter_status",
+        "wal_usage_bytes",
+        "local_targets_count"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "alloy_status": { "type": "string", "enum": ["healthy", "unhealthy", "disabled"] },
+        "pve_exporter_status": { "type": "string", "enum": ["healthy", "unhealthy", "disabled"] },
+        "wal_usage_bytes": { "type": "integer", "minimum": 0 },
+        "local_targets_count": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

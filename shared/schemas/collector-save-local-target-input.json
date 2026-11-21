@@ -1,0 +1,142 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/collector-save-local-target-input.json",
+  "title": "central-monitoring-collector save-local-target input",
+  "description": "Creates or updates a customer LAN scrape target (Proxmox VE, Windows Exporter, Linux Node Exporter, SNMP v2c/v3 appliance, or custom HTTP exporter).",
+  "type": "object",
+  "required": ["name", "enabled", "target_type", "device_role", "host"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^(|[a-zA-Z0-9_-]{3,64})$",
+      "default": ""
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "target_type": {
+      "type": "string",
+      "enum": ["proxmox", "windows", "linux", "snmp", "custom-exporter"]
+    },
+    "device_role": {
+      "type": "string",
+      "enum": [
+        "ns8",
+        "linux",
+        "windows",
+        "proxmox",
+        "web",
+        "snmp-network",
+        "snmp-ups",
+        "snmp-nas",
+        "snmp-firewall",
+        "snmp-printer"
+      ]
+    },
+    "host": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^[^/\\s:]+$"
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "scrape_interval": {
+      "type": "string",
+      "pattern": "^(10|15|30|60|120|300)s$",
+      "default": "30s"
+    },
+    "scheme": {
+      "type": "string",
+      "enum": ["http", "https"],
+      "default": "http"
+    },
+    "metrics_path": {
+      "type": "string",
+      "pattern": "^/[^\\s]*$",
+      "default": "/metrics"
+    },
+    "tls_skip_verify": {
+      "type": "boolean",
+      "default": false
+    },
+    "secret_unchanged": {
+      "type": "boolean",
+      "default": false
+    },
+    "pve_token_id": {
+      "type": "string",
+      "maxLength": 128,
+      "default": "",
+      "description": "Proxmox API token ID (e.g. monitoring@pve!alloy) when target_type is proxmox."
+    },
+    "pve_token_secret": {
+      "type": "string",
+      "maxLength": 256,
+      "default": ""
+    },
+    "snmp_module": {
+      "type": "string",
+      "enum": ["if_mib", "apcupsd", "synology", "qnap", "printer", "generic"],
+      "default": "if_mib"
+    },
+    "snmp_version": {
+      "type": "string",
+      "enum": ["v2c", "v3"],
+      "default": "v2c"
+    },
+    "snmp_community": {
+      "type": "string",
+      "maxLength": 128,
+      "default": "public"
+    },
+    "snmp_v3": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "username": { "type": "string", "maxLength": 128 },
+        "security_level": {
+          "type": "string",
+          "enum": ["noAuthNoPriv", "authNoPriv", "authPriv"],
+          "default": "authPriv"
+        },
+        "auth_protocol": {
+          "type": "string",
+          "enum": ["MD5", "SHA", "SHA224", "SHA256", "SHA384", "SHA512"],
+          "default": "SHA256"
+        },
+        "auth_password": { "type": "string", "maxLength": 256 },
+        "priv_protocol": {
+          "type": "string",
+          "enum": ["DES", "AES", "AES192", "AES256"],
+          "default": "AES"
+        },
+        "priv_password": { "type": "string", "maxLength": 256 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "target_type": { "const": "proxmox" } },
+        "required": ["target_type"]
+      },
+      "then": {
+        "required": ["pve_token_id"],
+        "properties": {
+          "pve_token_id": { "minLength": 5 }
+        }
+      }
+    }
+  ]
+}

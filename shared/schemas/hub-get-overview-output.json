@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-get-overview-output.json",
+  "title": "central-monitoring-hub get-overview output",
+  "description": "Lightweight operational overview for the Hub Cockpit dashboard (never overrides core get-status).",
+  "type": "object",
+  "required": [
+    "configured",
+    "grafana_url",
+    "ingest_metrics_url",
+    "ingest_logs_url",
+    "storage_mode",
+    "components",
+    "counts",
+    "storage_usage_bytes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "configured": { "type": "boolean" },
+    "grafana_url": { "type": "string" },
+    "ingest_metrics_url": { "type": "string" },
+    "ingest_logs_url": { "type": "string" },
+    "storage_mode": { "type": "string", "enum": ["local", "s3"] },
+    "s3_bucket": { "type": "string" },
+    "components": {
+      "type": "object",
+      "required": [
+        "hub_gateway",
+        "prometheus",
+        "loki",
+        "grafana",
+        "alertmanager",
+        "prom_label_proxy",
+        "blackbox_exporter",
+        "snmp_exporter",
+        "thanos_sidecar",
+        "thanos_store",
+        "thanos_query"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "hub_gateway": { "type": "string", "enum": ["healthy", "unhealthy", "disabled"] },
+        "prometheus": { "type": "string", "enum": ["healthy", "unhealthy", "disabled"] },
+        "loki": { "type": "string", "enum": ["healthy", "unhealthy", "disabled"] },
+        "grafana": { "type": "string", "enum": ["healthy", "unhealthy", "disabled"] },
+        "alertmanager": { "type": "string", "enum": ["healthy", "unhealthy", "disabled"] },
+        "prom_label_proxy": { "type": "string", "enum": ["healthy", "unhealthy", "disabled"] },
+        "blackbox_exporter": { "type": "string", "enum": ["healthy", "unhealthy", "disabled"] },
+        "snmp_exporter": { "type": "string", "enum": ["healthy", "unhealthy", "disabled"] },
+        "thanos_sidecar": { "type": "string", "enum": ["healthy", "unhealthy", "disabled"] },
+        "thanos_store": { "type": "string", "enum": ["healthy", "unhealthy", "disabled"] },
+        "thanos_query": { "type": "string", "enum": ["healthy", "unhealthy", "disabled"] }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "required": [
+        "tenants",
+        "portal_enabled_tenants",
+        "central_targets",
+        "active_series",
+        "firing_alerts_critical",
+        "firing_alerts_warning",
+        "active_silences"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "tenants": { "type": "integer", "minimum": 0 },
+        "portal_enabled_tenants": { "type": "integer", "minimum": 0 },
+        "central_targets": { "type": "integer", "minimum": 0 },
+        "active_series": { "type": "integer", "minimum": 0 },
+        "firing_alerts_critical": { "type": "integer", "minimum": 0 },
+        "firing_alerts_warning": { "type": "integer", "minimum": 0 },
+        "active_silences": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "storage_usage_bytes": {
+      "type": "object",
+      "required": ["prometheus_bytes", "loki_bytes", "grafana_bytes", "total_bytes"],
+      "additionalProperties": false,
+      "properties": {
+        "prometheus_bytes": { "type": "integer", "minimum": 0 },
+        "loki_bytes": { "type": "integer", "minimum": 0 },
+        "grafana_bytes": { "type": "integer", "minimum": 0 },
+        "total_bytes": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

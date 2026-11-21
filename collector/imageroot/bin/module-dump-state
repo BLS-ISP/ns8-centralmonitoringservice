@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""Pre-backup Restic consistency hook for central-monitoring-collector."""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+PYPKG = Path(__file__).resolve().parents[1] / "pypkg"
+if str(PYPKG) not in sys.path:
+    sys.path.insert(0, str(PYPKG))
+
+from collector_lib.runtime import atomic_write_text, get_state_dir
+
+
+def main() -> int:
+    state_dir = get_state_dir()
+
+    secrets_env = state_dir / "secrets.env"
+    if not secrets_env.exists():
+        atomic_write_text(secrets_env, "", mode=0o600)
+    else:
+        try:
+            os.chmod(secrets_env, 0o600)
+        except OSError:
+            pass
+
+    targets_file = state_dir / "local-targets.json"
+    if not targets_file.exists():
+        atomic_write_text(targets_file, json.dumps({"targets": []}, indent=2) + "\n", mode=0o600)
+    else:
+        # Validate JSON integrity before Restic snapshots state
+        json.loads(targets_file.read_text(encoding="utf-8"))
+        try:
+            os.chmod(targets_file, 0o600)
+        except OSError:
+            pass
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

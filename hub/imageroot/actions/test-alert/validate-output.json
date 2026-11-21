@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-test-alert-output.json",
+  "title": "central-monitoring-hub test-alert output",
+  "type": "object",
+  "required": ["status", "delivered", "message"],
+  "additionalProperties": false,
+  "properties": {
+    "status": { "type": "string", "enum": ["ok", "error"] },
+    "delivered": { "type": "boolean" },
+    "message": { "type": "string" }
+  }
+}

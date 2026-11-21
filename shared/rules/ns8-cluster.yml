@@ -1,0 +1,226 @@
+# NS8 Central Monitoring Service — NethServer 8 Cluster Alert Rules
+# Capability: telemetry-contract (shared/rules/ns8-cluster.yml)
+# Compatible with MSP multi-tenant Alertmanager routing via customer & site labels.
+
+groups:
+  - name: ns8.cluster.availability
+    interval: 30s
+    rules:
+      - alert: NS8NodeUnreachable
+        expr: up{device_role="ns8"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          category: cluster
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] NS8-Knoten nicht erreichbar / NS8 node unreachable ({{ $labels.instance }})"
+          description: "Der NethServer-8-Knoten {{ $labels.instance }} (Mandant: {{ $labels.customer }}, Standort: {{ $labels.site }}) antwortet seit über 3 Minuten nicht auf Metrik-Abfragen."
+
+      - alert: NS8CollectorTelemetryStale
+        expr: >
+          (max by (customer, site, instance, collector_id) (up{device_role="ns8"} offset 15m))
+          unless
+          (max by (customer, site, instance, collector_id) (up{device_role="ns8"}))
+        for: 5m
+        labels:
+          severity: critical
+          category: cluster
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] NS8-Telemetrie ausgefallen / NS8 remote telemetry lost ({{ $labels.instance }})"
+          description: "Vom NS8-Knoten {{ $labels.instance }} (Mandant: {{ $labels.customer }}, Standort: {{ $labels.site }}, Collector: {{ $labels.collector_id }}) treffen keine Remote-Write-Metriken mehr im Hub ein."
+
+  - name: ns8.cluster.resources
+    interval: 60s
+    rules:
+      - alert: NS8HighCpuUsage
+        expr: >
+          (100 - (avg by (customer, site, instance) (rate(node_cpu_seconds_total{device_role="ns8", mode="idle"}[5m])) * 100)) > 90
+        for: 15m
+        labels:
+          severity: warning
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] NS8 CPU-Last > 90% / High CPU usage on {{ $labels.instance }}"
+          description: "Die CPU-Auslastung auf NS8-Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) liegt seit 15 Minuten bei {{ printf \"%.1f\" $value }}%."
+
+      - alert: NS8CriticalCpuSaturation
+        expr: >
+          (100 - (avg by (customer, site, instance) (rate(node_cpu_seconds_total{device_role="ns8", mode="idle"}[5m])) * 100)) > 97
+        for: 15m
+        labels:
+          severity: critical
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Kritische NS8 CPU-Sättigung / Critical CPU saturation on {{ $labels.instance }}"
+          description: "NS8-Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) ist mit {{ printf \"%.1f\" $value }}% CPU-Last überlastet."
+
+      - alert: NS8HighMemoryUsage
+        expr: >
+          ((1 - (node_memory_MemAvailable_bytes{device_role="ns8"} / (node_memory_MemTotal_bytes{device_role="ns8"} > 0))) * 100) > 90
+        for: 10m
+        labels:
+          severity: warning
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] NS8 RAM-Auslastung > 90% / High memory usage on {{ $labels.instance }}"
+          description: "Auf NS8-Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) sind {{ printf \"%.1f\" $value }}% des Arbeitsspeichers belegt."
+
+      - alert: NS8CriticalMemoryUsage
+        expr: >
+          ((1 - (node_memory_MemAvailable_bytes{device_role="ns8"} / (node_memory_MemTotal_bytes{device_role="ns8"} > 0))) * 100) > 95
+        for: 5m
+        labels:
+          severity: critical
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Kritischer NS8 Speichermangel / Critical RAM usage on {{ $labels.instance }}"
+          description: "Akute OOM-Gefahr auf NS8-Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}): {{ printf \"%.1f\" $value }}% RAM belegt."
+
+      - alert: NS8SwapMissing
+        expr: node_memory_SwapTotal_bytes{device_role="ns8"} == 0
+        for: 30m
+        labels:
+          severity: warning
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Kein Swap konfiguriert / Swap missing on NS8 node {{ $labels.instance }}"
+          description: "Auf NS8-Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) ist kein aktiver Swap-Speicher eingerichtet (Empfehlung für NS8: mindestens 2-4 GiB Swap)."
+
+      - alert: NS8SwapAlmostFull
+        expr: >
+          (((node_memory_SwapTotal_bytes{device_role="ns8"} - node_memory_SwapFree_bytes{device_role="ns8"}) / (node_memory_SwapTotal_bytes{device_role="ns8"} > 0)) * 100) > 85
+        for: 15m
+        labels:
+          severity: warning
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] NS8 Swap > 85% belegt / Swap space exhausted on {{ $labels.instance }}"
+          description: "Der Swap-Speicher auf NS8-Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) ist zu {{ printf \"%.1f\" $value }}% gefüllt."
+
+  - name: ns8.cluster.storage_and_raid
+    interval: 60s
+    rules:
+      - alert: NS8PartitionSpaceWarning
+        expr: >
+          ((1 - (node_filesystem_avail_bytes{device_role="ns8", fstype!~"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs", mountpoint!~"/run.*|/var/lib/containers/storage/overlay.*"} / (node_filesystem_size_bytes{device_role="ns8", fstype!~"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs", mountpoint!~"/run.*|/var/lib/containers/storage/overlay.*"} > 0))) * 100) > 85
+          and
+          ((1 - (node_filesystem_avail_bytes{device_role="ns8", fstype!~"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs", mountpoint!~"/run.*|/var/lib/containers/storage/overlay.*"} / (node_filesystem_size_bytes{device_role="ns8", fstype!~"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs", mountpoint!~"/run.*|/var/lib/containers/storage/overlay.*"} > 0))) * 100) <= 95
+        for: 10m
+        labels:
+          severity: warning
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] NS8 Partition {{ $labels.mountpoint }} > 85% voll ({{ $labels.instance }})"
+          description: "Dateisystem {{ $labels.mountpoint }} auf NS8-Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) ist zu {{ printf \"%.1f\" $value }}% belegt."
+
+      - alert: NS8PartitionSpaceCritical
+        expr: >
+          ((1 - (node_filesystem_avail_bytes{device_role="ns8", fstype!~"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs", mountpoint!~"/run.*|/var/lib/containers/storage/overlay.*"} / (node_filesystem_size_bytes{device_role="ns8", fstype!~"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs", mountpoint!~"/run.*|/var/lib/containers/storage/overlay.*"} > 0))) * 100) > 95
+        for: 5m
+        labels:
+          severity: critical
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Kritisch: NS8 Partition {{ $labels.mountpoint }} > 95% voll ({{ $labels.instance }})"
+          description: "Akuter Platzmangel auf NS8-Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}): Partition {{ $labels.mountpoint }} ist zu {{ printf \"%.1f\" $value }}% gefüllt."
+
+      - alert: NS8DiskFillPrediction24h
+        expr: >
+          (
+            node_filesystem_avail_bytes{device_role="ns8", fstype!~"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs", mountpoint!~"/run.*|/var/lib/containers/storage/overlay.*"}
+            /
+            (node_filesystem_size_bytes{device_role="ns8", fstype!~"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs", mountpoint!~"/run.*|/var/lib/containers/storage/overlay.*"} > 0)
+            < 0.30
+          )
+          and
+          (
+            predict_linear(node_filesystem_avail_bytes{device_role="ns8", fstype!~"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs", mountpoint!~"/run.*|/var/lib/containers/storage/overlay.*"}[6h], 24 * 3600) < 0
+          )
+        for: 30m
+        labels:
+          severity: warning
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] NS8 Partition {{ $labels.mountpoint }} läuft in <24h voll ({{ $labels.instance }})"
+          description: "Lineare Trendprognose (6h-Fenster) zeigt, dass Partition {{ $labels.mountpoint }} auf NS8-Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) innerhalb von 24 Stunden vollläuft."
+
+      - alert: NS8MdadmRaidDegraded
+        expr: >
+          (node_md_disks{device_role="ns8", state="failed"} > 0)
+          or
+          ((node_md_disks_required{device_role="ns8"} - on (customer, site, instance, device) node_md_disks{device_role="ns8", state="active"}) > 0)
+        for: 2m
+        labels:
+          severity: critical
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] NS8 Software-RAID degradiert ({{ $labels.device }} auf {{ $labels.instance }})"
+          description: "Das mdadm-RAID-Array {{ $labels.device }} auf NS8-Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) meldet ausgefallene oder fehlende Festplatten."
+
+  - name: ns8.cluster.workloads_and_backups
+    interval: 60s
+    rules:
+      - alert: NS8ResticBackupFailed
+        expr: >
+          (ns8_backup_status == 0)
+          or
+          (ns8_backup_failed > 0)
+        for: 5m
+        labels:
+          severity: critical
+          category: backup
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] NS8 Restic-Backup fehlgeschlagen ({{ $labels.module_id }} auf {{ $labels.instance }})"
+          description: "Das NS8-Restic-Backup für Modul {{ $labels.module_id }} auf Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) ist fehlgeschlagen."
+
+      - alert: NS8ResticBackupStale
+        expr: >
+          ((time() - ns8_backup_last_success_timestamp_seconds) > 129600)
+          and
+          (ns8_backup_last_success_timestamp_seconds > 0)
+        for: 15m
+        labels:
+          severity: warning
+          category: backup
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] NS8 Backup älter als 36h ({{ $labels.module_id }} auf {{ $labels.instance }})"
+          description: "Für Modul {{ $labels.module_id }} auf NS8-Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) wurde seit über 36 Stunden kein erfolgreiches Restic-Backup aufgezeichnet."
+
+      - alert: NS8ContainerCrashLoop
+        expr: >
+          (increase(ns8_container_restarts_total[15m]) >= 3)
+          or
+          (ns8_container_running == 0)
+        for: 5m
+        labels:
+          severity: critical
+          category: cluster
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] NS8 Container gestoppt/Crashloop ({{ $labels.container }} auf {{ $labels.instance }})"
+          description: "Rootless-Podman-Container {{ $labels.container }} (Modul: {{ $labels.module_id }}) auf NS8-Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) startet wiederholt neu oder ist gestoppt."
+
+      - alert: NS8ContainerInfoAbsent
+        expr: >
+          ((ns8_container_info offset 15m) unless on (customer, site, instance, container) ns8_container_info)
+          or
+          ((up{device_role="ns8"} == 1) unless on (customer, site, instance) (count by (customer, site, instance) (ns8_container_info) > 0))
+        for: 10m
+        labels:
+          severity: warning
+          category: cluster
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] NS8 Container-Metrik ns8_container_info fehlt ({{ $labels.instance }})"
+          description: "Auf NS8-Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) fehlen erwartete ns8_container_info-Metriken (Container {{ $labels.container }} verschwunden oder Podman-Kollektor gestört)."
+
+      - alert: NS8SystemdUnitFailed
+        expr: >
+          (node_systemd_unit_state{device_role="ns8", state="failed"} == 1)
+          or
+          (ns8_systemd_unit_failed == 1)
+        for: 5m
+        labels:
+          severity: critical
+          category: cluster
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] NS8 Systemd-Dienst fehlgeschlagen ({{ $labels.name }} auf {{ $labels.instance }})"
+          description: "Ein System- oder Rootless-Modul-Systemd-Dienst ({{ $labels.name }}) befindet sich auf NS8-Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) im Status 'failed'."

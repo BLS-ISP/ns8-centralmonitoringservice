@@ -1,0 +1,141 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-get-alerting-output.json",
+  "title": "central-monitoring-hub get-alerting output",
+  "description": "Returns Alertmanager routing and multi-channel receiver configuration with secret tokens/passwords redacted.",
+  "type": "object",
+  "required": [
+    "group_wait",
+    "group_interval",
+    "repeat_interval",
+    "ns8_smarthost_available",
+    "smarthost_email",
+    "webhook_psa",
+    "chat",
+    "push",
+    "customer_email_routing",
+    "rule_packs"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "group_wait": { "type": "string" },
+    "group_interval": { "type": "string" },
+    "repeat_interval": { "type": "string" },
+    "ns8_smarthost_available": { "type": "boolean" },
+    "ns8_smarthost_host": { "type": "string" },
+    "smarthost_email": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "use_ns8_smarthost",
+        "smtp_host",
+        "smtp_port",
+        "smtp_user",
+        "has_smtp_password",
+        "smtp_tls",
+        "from_address",
+        "default_to_addresses",
+        "send_resolved"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "use_ns8_smarthost": { "type": "boolean" },
+        "smtp_host": { "type": "string" },
+        "smtp_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "smtp_user": { "type": "string" },
+        "has_smtp_password": { "type": "boolean" },
+        "smtp_tls": { "type": "boolean" },
+        "from_address": { "type": "string" },
+        "default_to_addresses": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "send_resolved": { "type": "boolean" }
+      }
+    },
+    "webhook_psa": {
+      "type": "object",
+      "required": ["enabled", "url", "has_auth_secret", "send_resolved"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "url": { "type": "string" },
+        "has_auth_secret": { "type": "boolean" },
+        "send_resolved": { "type": "boolean" }
+      }
+    },
+    "chat": {
+      "type": "object",
+      "required": [
+        "teams_enabled",
+        "has_teams_webhook_url",
+        "slack_enabled",
+        "has_slack_webhook_url",
+        "slack_channel",
+        "send_resolved"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "teams_enabled": { "type": "boolean" },
+        "has_teams_webhook_url": { "type": "boolean" },
+        "slack_enabled": { "type": "boolean" },
+        "has_slack_webhook_url": { "type": "boolean" },
+        "slack_channel": { "type": "string" },
+        "send_resolved": { "type": "boolean" }
+      }
+    },
+    "push": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "provider",
+        "min_severity",
+        "ntfy_url",
+        "ntfy_topic",
+        "has_ntfy_token",
+        "telegram_chat_id",
+        "has_telegram_bot_token",
+        "gotify_url",
+        "has_gotify_token"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "provider": { "type": "string", "enum": ["none", "ntfy", "telegram", "gotify"] },
+        "min_severity": { "type": "string", "enum": ["warning", "critical"] },
+        "ntfy_url": { "type": "string" },
+        "ntfy_topic": { "type": "string" },
+        "has_ntfy_token": { "type": "boolean" },
+        "telegram_chat_id": { "type": "string" },
+        "has_telegram_bot_token": { "type": "boolean" },
+        "gotify_url": { "type": "string" },
+        "has_gotify_token": { "type": "boolean" }
+      }
+    },
+    "customer_email_routing": {
+      "type": "object",
+      "required": ["enabled", "min_severity", "send_resolved"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "min_severity": { "type": "string", "enum": ["warning", "critical"] },
+        "send_resolved": { "type": "boolean" }
+      }
+    },
+    "rule_packs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["pack_id", "filename", "enabled", "rules_count"],
+        "additionalProperties": false,
+        "properties": {
+          "pack_id": { "type": "string" },
+          "filename": { "type": "string" },
+          "enabled": { "type": "boolean" },
+          "rules_count": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  }
+}

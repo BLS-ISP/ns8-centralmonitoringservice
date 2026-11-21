@@ -1,0 +1,54 @@
+# ============================================================================
+# NS8 Central Monitoring Service — Standalone Docker Compose Stack (Alloy)
+# Template: shared/alloy-templates/docker-compose.yml.tmpl
+# Tenant:   {{CUSTOMER}} | Site: {{SITE}} | Collector: {{COLLECTOR_ID}}
+# Hub URL:  {{HUB_URL}}
+#
+# SECURITY NOTES BEFORE STARTING:
+#   1. Restrict host permissions on config.alloy (contains live bearer token):
+#        chmod 0600 config.alloy
+#   2. Syslog ports default to 127.0.0.1:5514 so Docker iptables rules never
+#      expose UDP/TCP 5514 on public/WAN interfaces. To accept Syslog from LAN
+#      firewalls/switches/NAS, bind explicitly to your private LAN IP, e.g.:
+#        - "192.168.1.50:5514:5514/udp"
+#        - "192.168.1.50:5514:5514/tcp"
+#   3. Start stack:
+#        docker compose up -d
+# ============================================================================
+
+services:
+  alloy:
+    image: grafana/alloy:v1.4.2
+    container_name: "ns8-alloy-{{COLLECTOR_ID}}"
+    hostname: "{{COLLECTOR_ID}}"
+    restart: unless-stopped
+    command:
+      - "run"
+      - "--server.http.listen-addr=0.0.0.0:12345"
+      - "--storage.path=/var/lib/alloy/data"
+      - "/etc/alloy/config.alloy"
+    ports:
+      - "127.0.0.1:12345:12345"
+      # Default loopback binding; replace 127.0.0.1 with your private LAN IP
+      # (e.g. "192.168.1.50:5514:5514/udp") when ingesting LAN appliance Syslog:
+      - "127.0.0.1:5514:5514/udp"
+      - "127.0.0.1:5514:5514/tcp"
+    volumes:
+      # Ensure host file is locked down (`chmod 0600 config.alloy`) before launch:
+      - ./config.alloy:/etc/alloy/config.alloy:ro
+      - alloy_wal_data:/var/lib/alloy/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /:/host/root:ro,rslave
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    labels:
+      org.nethserver.monitoring.customer: "{{CUSTOMER}}"
+      org.nethserver.monitoring.site: "{{SITE}}"
+      org.nethserver.monitoring.collector_id: "{{COLLECTOR_ID}}"
+      org.nethserver.monitoring.hub_url: "{{HUB_URL}}"
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  alloy_wal_data:
+    name: "ns8-alloy-wal-{{COLLECTOR_ID}}"

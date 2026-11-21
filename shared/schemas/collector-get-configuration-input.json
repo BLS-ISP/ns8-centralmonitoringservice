@@ -1,0 +1,8 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/collector-get-configuration-input.json",
+  "title": "central-monitoring-collector get-configuration input",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {}
+}

@@ -1,0 +1,185 @@
+# NS8 Central Monitoring Service — Linux Server Alert Rules (node_exporter / Alloy unix)
+# Capability: telemetry-contract (shared/rules/linux-node.yml)
+
+groups:
+  - name: linux.node.availability
+    interval: 30s
+    rules:
+      - alert: LinuxHostDown
+        expr: up{device_role="linux"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Linux-Server nicht erreichbar / Host down ({{ $labels.instance }})"
+          description: "Linux-Host {{ $labels.instance }} (Mandant: {{ $labels.customer }}, Standort: {{ $labels.site }}) ist seit über 3 Minuten nicht erreichbar (up == 0)."
+
+      - alert: LinuxAgentTelemetryStale
+        expr: >
+          (max by (customer, site, instance, collector_id) (up{device_role="linux"} offset 15m))
+          unless
+          (max by (customer, site, instance, collector_id) (up{device_role="linux"}))
+        for: 5m
+        labels:
+          severity: critical
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Linux-Agent sendet keine Daten / Agent offline ({{ $labels.instance }})"
+          description: "Vom Linux-System {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}, Collector: {{ $labels.collector_id }}) treffen seit über 15 Minuten keine Metriken mehr ein."
+
+      - alert: LinuxHostRebooted
+        expr: >
+          ((node_time_seconds{device_role="linux"} - node_boot_time_seconds{device_role="linux"}) < 600)
+          and
+          ((node_time_seconds{device_role="linux"} - node_boot_time_seconds{device_role="linux"}) > 0)
+        for: 0m
+        labels:
+          severity: warning
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Linux-Server neu gestartet / Reboot detected ({{ $labels.instance }})"
+          description: "Linux-Host {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) wurde vor weniger als 10 Minuten neu gestartet (Uptime: {{ printf \"%.0f\" $value }}s)."
+
+  - name: linux.node.compute_and_memory
+    interval: 60s
+    rules:
+      - alert: LinuxHighCpuUsage
+        expr: >
+          (100 - (avg by (customer, site, instance) (rate(node_cpu_seconds_total{device_role="linux", mode="idle"}[5m])) * 100)) > 90
+        for: 15m
+        labels:
+          severity: warning
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Hohe CPU-Auslastung auf Linux-Host {{ $labels.instance }}"
+          description: "Die CPU-Auslastung auf {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) liegt seit 15 Minuten bei {{ printf \"%.1f\" $value }}%."
+
+      - alert: LinuxHighSystemLoad
+        expr: >
+          (
+            node_load15{device_role="linux"}
+            /
+            (count by (customer, site, instance) (node_cpu_seconds_total{device_role="linux", mode="idle"}) > 0)
+          ) > 2.0
+        for: 15m
+        labels:
+          severity: warning
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Hohe System-Load (15m) auf Linux-Host {{ $labels.instance }}"
+          description: "Die normierte 15-Minuten-Systemlast pro CPU-Kern auf {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) beträgt {{ printf \"%.2f\" $value }} (> 2.0x Kerne)."
+
+      - alert: LinuxHighMemoryUsage
+        expr: >
+          ((1 - (node_memory_MemAvailable_bytes{device_role="linux"} / (node_memory_MemTotal_bytes{device_role="linux"} > 0))) * 100) > 90
+        for: 10m
+        labels:
+          severity: warning
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] RAM-Auslastung > 90% auf Linux-Host {{ $labels.instance }}"
+          description: "Auf Linux-Host {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) sind {{ printf \"%.1f\" $value }}% des verfügbaren Arbeitsspeichers belegt."
+
+      - alert: LinuxCriticalMemoryPressure
+        expr: >
+          ((1 - (node_memory_MemAvailable_bytes{device_role="linux"} / (node_memory_MemTotal_bytes{device_role="linux"} > 0))) * 100) > 96
+        for: 5m
+        labels:
+          severity: critical
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Kritischer Speicherdruck (>96%) auf Linux-Host {{ $labels.instance }}"
+          description: "Nur noch unter 4% Arbeitsspeicher verfügbar auf {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}): aktuell {{ printf \"%.1f\" $value }}% belegt."
+
+      - alert: LinuxOomKillDetected
+        expr: increase(node_vmstat_oom_kill{device_role="linux"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Linux Kernel OOM-Killer ausgelöst auf {{ $labels.instance }}"
+          description: "Der Linux-Kernel auf {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) hat in den letzten 15 Minuten Prozesse wegen Speichermangels beendet (OOM-Kill)."
+
+  - name: linux.node.storage_and_system
+    interval: 60s
+    rules:
+      - alert: LinuxFilesystemSpaceWarning
+        expr: >
+          ((1 - (node_filesystem_avail_bytes{device_role="linux", fstype!~"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs", mountpoint!~"/run.*|/snap.*"} / (node_filesystem_size_bytes{device_role="linux", fstype!~"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs", mountpoint!~"/run.*|/snap.*"} > 0))) * 100) > 85
+          and
+          ((1 - (node_filesystem_avail_bytes{device_role="linux", fstype!~"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs", mountpoint!~"/run.*|/snap.*"} / (node_filesystem_size_bytes{device_role="linux", fstype!~"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs", mountpoint!~"/run.*|/snap.*"} > 0))) * 100) <= 95
+        for: 10m
+        labels:
+          severity: warning
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Dateisystem {{ $labels.mountpoint }} > 85% voll ({{ $labels.instance }})"
+          description: "Dateisystem {{ $labels.mountpoint }} auf Linux-Host {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) ist zu {{ printf \"%.1f\" $value }}% gefüllt."
+
+      - alert: LinuxFilesystemSpaceCritical
+        expr: >
+          ((1 - (node_filesystem_avail_bytes{device_role="linux", fstype!~"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs", mountpoint!~"/run.*|/snap.*"} / (node_filesystem_size_bytes{device_role="linux", fstype!~"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs", mountpoint!~"/run.*|/snap.*"} > 0))) * 100) > 95
+        for: 5m
+        labels:
+          severity: critical
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Kritisch: Dateisystem {{ $labels.mountpoint }} > 95% voll ({{ $labels.instance }})"
+          description: "Akuter Speicherplatzmangel auf {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}): {{ $labels.mountpoint }} ist zu {{ printf \"%.1f\" $value }}% belegt."
+
+      - alert: LinuxFilesystemInodesExhausting
+        expr: >
+          ((1 - (node_filesystem_files_free{device_role="linux", fstype!~"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs", mountpoint!~"/snap.*"} / (node_filesystem_files{device_role="linux", fstype!~"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs", mountpoint!~"/snap.*"} > 0))) * 100) > 90
+        for: 10m
+        labels:
+          severity: warning
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Inodes > 90% belegt auf {{ $labels.mountpoint }} ({{ $labels.instance }})"
+          description: "Auf Dateisystem {{ $labels.mountpoint }} von {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) sind {{ printf \"%.1f\" $value }}% aller Inodes verbraucht."
+
+      - alert: LinuxFilesystemReadOnly
+        expr: node_filesystem_readonly{device_role="linux", fstype!~"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs", mountpoint!~"/snap.*"} == 1
+        for: 2m
+        labels:
+          severity: critical
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Dateisystem {{ $labels.mountpoint }} ist Read-Only ({{ $labels.instance }})"
+          description: "Dateisystem {{ $labels.mountpoint }} auf Linux-Host {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) wurde schreibgeschützt eingehängt (möglicher I/O- oder Dateisystemfehler)."
+
+      - alert: LinuxDiskIoSaturation
+        expr: >
+          (rate(node_disk_io_time_seconds_total{device_role="linux", device!~"loop.*|ram.*|sr.*"}[5m]) * 100) > 90
+        for: 15m
+        labels:
+          severity: warning
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Hohe Disk-I/O-Auslastung ({{ $labels.device }} auf {{ $labels.instance }})"
+          description: "Blockgerät {{ $labels.device }} auf Linux-Host {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) weist seit 15 Minuten {{ printf \"%.1f\" $value }}% I/O-Sättigung auf."
+
+      - alert: LinuxSystemdServiceFailed
+        expr: node_systemd_unit_state{device_role="linux", state="failed"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Systemd-Service fehlgeschlagen ({{ $labels.name }} auf {{ $labels.instance }})"
+          description: "Der Systemd-Dienst {{ $labels.name }} auf Linux-Host {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) steht seit mindestens 5 Minuten auf 'failed'."
+
+      - alert: LinuxNtpOutOfSync
+        expr: >
+          (node_timex_sync_status{device_role="linux"} == 0)
+          or
+          (abs(node_timex_offset_seconds{device_role="linux"}) > 0.5)
+        for: 15m
+        labels:
+          severity: warning
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] NTP-Zeitsynchronisation gestört auf {{ $labels.instance }}"
+          description: "Die Systemuhr auf Linux-Host {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) ist nicht per NTP synchronisiert oder weicht um mehr als 500ms ab."

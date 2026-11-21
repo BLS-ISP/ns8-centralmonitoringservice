@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""Persist Hub configuration, flush dump_env(), render configs, set Traefik route, and run hooks."""
+
+import json
+import sys
+from pathlib import Path
+
+_IMAGEROOT = Path(__file__).resolve().parents[2]
+_PYPKG = _IMAGEROOT / "pypkg"
+if str(_PYPKG) not in sys.path:
+    sys.path.insert(0, str(_PYPKG))
+
+from hub_core import resolve_state_dir  # noqa: E402
+from hub_core.config_renderer import render_all_configs  # noqa: E402
+from hub_core.env_store import (  # noqa: E402
+    apply_configuration,
+    build_urls,
+    discover_smarthost,
+)
+
+
+def main() -> int:
+    import agent
+
+    request = json.load(sys.stdin)
+    state_dir = resolve_state_dir()
+
+    try:
+        env = apply_configuration(state_dir, request)
+    except ValueError as exc:
+        agent.set_status("validation-failed")
+        json.dump(
+            [
+                {
+                    "field": "s3",
+                    "parameter": "s3",
+                    "value": "",
+                    "error": str(exc),
+                }
+            ],
+            sys.stdout,
+        )
+        sys.exit(2)
+
+    discover_smarthost(state_dir)
+    render_all_configs(state_dir)
+
+    # Register HTTP ingress route in NS8 Traefik (strictly 127.0.0.1:${TCP_PORT})
+    module_id = env.get("MODULE_ID", "central-monitoring-hub1")
+    tcp_port = env.get("TCP_PORT", "20080")
+    host = env["TRAEFIK_HOST"]
+    lets_encrypt = env.get("TRAEFIK_LETS_ENCRYPT", "true").lower() == "true"
+    http2https = env.get("TRAEFIK_HTTP2HTTPS", "true").lower() == "true"
+
+    traefik_id = agent.resolve_agent_id("traefik@node")
+    agent.tasks.run(
+        agent_id=traefik_id,
+        action="set-route",
+        data={
+            "instance": module_id,
+            "url": f"http://127.0.0.1:{tcp_port}",
+            "host": host,
+            "lets_encrypt": lets_encrypt,
+            "http2https": http2https,
+        },
+    )
+
+    # Guarded cross-module integration hooks
+    try:
+        from hub_tenancy.ldap_sync import sync_ldap_config
+
+        sync_ldap_config(state_dir, env)
+    except ImportError:
+        pass
+
+    try:
+        from hub_alerting.alertmanager_config import render_all_probe_configs
+
+        render_all_probe_configs(state_dir)
+    except (ImportError, AttributeError):
+        pass
+
+    try:
+        from hub_alerting.alertmanager_config import sync_alertmanager
+
+        sync_alertmanager(state_dir)
+    except ImportError:
+        pass
+
+    try:
+        from hub_tenancy.grafana_sync import sync_all_orgs_if_running
+
+        sync_all_orgs_if_running(state_dir, env)
+    except ImportError:
+        pass
+
+    urls = build_urls(host)
+    response = {
+        "status": "ok",
+        "grafana_url": urls["grafana_url"],
+        "ingest_metrics_url": urls["ingest_metrics_url"],
+        "ingest_logs_url": urls["ingest_logs_url"],
+        "storage_mode": env["STORAGE_MODE"],
+    }
+    json.dump(response, sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

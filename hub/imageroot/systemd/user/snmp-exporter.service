@@ -1,0 +1,36 @@
+[Unit]
+Description=Prometheus SNMP Exporter (Central Monitoring Hub)
+BindsTo=central-monitoring-hub.service
+After=central-monitoring-hub.service
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+EnvironmentFile=-%E/etc/defaults.env
+EnvironmentFile=%E/state/environment
+WorkingDirectory=%E/state
+Restart=always
+RestartSec=5
+TimeoutStopSec=70
+ExecStartPre=/bin/rm -f %t/%N.pid %t/%N.cid
+ExecStart=/usr/bin/podman run \
+    --conmon-pidfile %t/%N.pid \
+    --cidfile %t/%N.cid \
+    --cgroups=no-conmon \
+    --pod-id-file %t/central-monitoring-hub.pod-id \
+    --replace -d --name snmp-exporter \
+    --pull=missing \
+    --restart=on-failure \
+    --sdnotify=conmon \
+    --user 0:0 \
+    --volume=%E/config/snmp/snmp.yml:/etc/snmp_exporter/snmp.yml:Z \
+    ${SNMP_EXPORTER_IMAGE} \
+    --config.file=/etc/snmp_exporter/snmp.yml \
+    --web.listen-address=127.0.0.1:9116
+ExecStop=/usr/bin/podman stop --ignore --cidfile %t/%N.cid -t 10
+ExecStopPost=/usr/bin/podman rm --ignore -f --cidfile %t/%N.cid
+PIDFile=%t/%N.pid
+Type=notify
+NotifyAccess=all
+
+[Install]
+WantedBy=default.target

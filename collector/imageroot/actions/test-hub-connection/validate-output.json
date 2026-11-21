@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/collector-test-hub-connection-output.json",
+  "title": "central-monitoring-collector test-hub-connection output",
+  "type": "object",
+  "required": ["ok", "http_status", "latency_ms", "verified_customer", "message"],
+  "additionalProperties": false,
+  "properties": {
+    "ok": { "type": "boolean" },
+    "http_status": { "type": "integer", "minimum": 0, "maximum": 599 },
+    "latency_ms": { "type": "number", "minimum": 0 },
+    "verified_customer": { "type": ["string", "null"] },
+    "message": { "type": "string" }
+  }
+}

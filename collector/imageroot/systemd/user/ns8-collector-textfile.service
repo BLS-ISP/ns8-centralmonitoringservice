@@ -1,0 +1,7 @@
+[Unit]
+Description=Generate NS8 Restic backup, container, and systemd textfile metrics (ns8.prom)
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%E/state/environment
+ExecStart=%h/.config/bin/collect-ns8-metrics

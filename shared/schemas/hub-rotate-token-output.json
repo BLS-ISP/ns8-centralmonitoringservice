@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-rotate-token-output.json",
+  "title": "central-monitoring-hub rotate-token output",
+  "type": "object",
+  "required": ["status", "customer", "auth_token", "token_prefix", "previous_token_expires_at"],
+  "additionalProperties": false,
+  "properties": {
+    "status": { "type": "string", "enum": ["ok"] },
+    "customer": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$"
+    },
+    "auth_token": {
+      "type": "string",
+      "pattern": "^cms_v1_[A-Za-z0-9_-]{32,96}$"
+    },
+    "token_prefix": { "type": "string" },
+    "previous_token_expires_at": { "type": ["string", "null"] }
+  }
+}

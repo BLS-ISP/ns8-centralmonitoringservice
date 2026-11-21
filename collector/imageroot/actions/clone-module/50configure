@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""Reconfigure cloned collector instance with a fresh unique collector_id so series never collide."""
+
+from __future__ import annotations
+
+import os
+import secrets
+import shutil
+import sys
+from pathlib import Path
+
+PYPKG = Path(__file__).resolve().parents[2] / "pypkg"
+if str(PYPKG) not in sys.path:
+    sys.path.insert(0, str(PYPKG))
+
+import agent  # type: ignore[import-not-found]
+from collector_lib.alloy_renderer import (
+    CollectorConfig,
+    has_enabled_proxmox_targets,
+    render_collector_artifacts,
+)
+from collector_lib.ns8_metrics import collect_and_write_ns8_metrics
+from collector_lib.runtime import (
+    build_collector_id,
+    get_state_dir,
+    load_stored_auth_token,
+)
+from collector_lib.targets_store import TargetsStore
+
+
+def _systemctl(*args: str) -> None:
+    if shutil.which("systemctl") and os.name != "nt":
+        agent.run_helper("systemctl", "--user", *args)
+
+
+def main() -> int:
+    state_dir = get_state_dir()
+    env = agent.read_envfile(state_dir / "environment")
+
+    configured = env.get("CONFIGURED", os.environ.get("CONFIGURED", "0")) == "1"
+    customer = env.get("CUSTOMER", os.environ.get("CUSTOMER", ""))
+    site = env.get("SITE", os.environ.get("SITE", ""))
+    module_id = os.environ.get("MODULE_ID", "central-monitoring-collector-clone")
+    old_cid = env.get("COLLECTOR_ID", os.environ.get("COLLECTOR_ID", ""))
+
+    # Always mint a unique collector_id on clone so source & cloned nodes never overwrite each other
+    suffix = secrets.token_hex(3)
+    new_collector_id = build_collector_id(
+        customer=customer,
+        site=site,
+        module_id=module_id,
+        unique_suffix=suffix,
+    )
+    if new_collector_id == old_cid:
+        new_collector_id = build_collector_id(
+            customer=customer,
+            site=site,
+            module_id=module_id,
+            unique_suffix=secrets.token_hex(4),
+        )
+
+    agent.set_env("COLLECTOR_ID", new_collector_id)
+    agent.dump_env()
+
+    token = load_stored_auth_token(state_dir)
+    collect_local = env.get("COLLECT_LOCAL_NS8", "1") == "1"
+
+    cfg = CollectorConfig(
+        configured=configured,
+        hub_url=env.get("HUB_URL", ""),
+        auth_token=token,
+        customer=customer,
+        site=site,
+        collector_id=new_collector_id,
+        collect_local_ns8=collect_local,
+        enable_syslog_receiver=env.get("ENABLE_SYSLOG_RECEIVER", "0") == "1",
+        syslog_port=int(env.get("SYSLOG_PORT", "5514") or 5514),
+        wal_max_disk_mb=int(env.get("WAL_MAX_DISK_MB", "2048") or 2048),
+        tls_skip_verify=env.get("TLS_SKIP_VERIFY", "0") == "1",
+    )
+    targets = TargetsStore(state_dir).load_all()
+    render_collector_artifacts(state_dir, cfg, targets)
+
+    if configured:
+        if collect_local:
+            collect_and_write_ns8_metrics(state_dir)
+            _systemctl("enable", "--now", "ns8-collector-textfile.timer")
+        _systemctl("daemon-reload")
+        _systemctl("enable", "--now", "central-monitoring-collector.service")
+        if has_enabled_proxmox_targets(targets):
+            _systemctl("enable", "--now", "pve-exporter.service")
+        _systemctl("enable", "--now", "alloy.service")
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

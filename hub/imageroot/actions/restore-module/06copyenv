@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+"""Restore module environment variables during NS8 Restic restore and flush dump_env()."""
+
+import json
+import sys
+
+PRESERVED_INSTANCE_KEYS = frozenset(
+    {
+        "MODULE_ID",
+        "MODULE_UUID",
+        "NODE_ID",
+        "TCP_PORT",
+        "TCP_PORTS",
+        "AGENT_ID",
+        "AGENT_STATE_DIR",
+        "AGENT_INSTALL_DIR",
+    }
+)
+
+
+def main() -> int:
+    import agent
+
+    request = json.load(sys.stdin)
+    original_env = request.get("environment") or {}
+    if isinstance(original_env, dict):
+        for key, value in original_env.items():
+            if key in PRESERVED_INSTANCE_KEYS or key.endswith("_IMAGE"):
+                continue
+            agent.set_env(str(key), str(value))
+
+    # NS8 Rule #2: Flush environment to disk immediately!
+    agent.dump_env()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

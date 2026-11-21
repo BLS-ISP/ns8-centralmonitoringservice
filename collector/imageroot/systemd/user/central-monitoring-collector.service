@@ -1,0 +1,21 @@
+[Unit]
+Description=Rootless Podman pod for central-monitoring-collector
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+Environment=PODMAN_SYSLOG_ARGS=
+EnvironmentFile=-%E/state/environment
+Restart=on-failure
+TimeoutStopSec=70
+ExecStartPre=/bin/rm -f %t/central-monitoring-collector.pid %t/central-monitoring-collector.pod-id
+ExecStartPre=/usr/bin/podman pod create --infra-conmon-pidfile %t/central-monitoring-collector.pid --pod-id-file %t/central-monitoring-collector.pod-id --name central-monitoring-collector --network=slirp4netns:allow_host_loopback=true --replace $PODMAN_SYSLOG_ARGS
+ExecStart=/usr/bin/podman pod start --pod-id-file %t/central-monitoring-collector.pod-id
+ExecStop=/usr/bin/podman pod stop --ignore --pod-id-file %t/central-monitoring-collector.pod-id -t 10
+ExecStopPost=/usr/bin/podman pod rm --ignore -f --pod-id-file %t/central-monitoring-collector.pod-id
+PIDFile=%t/central-monitoring-collector.pid
+Type=forking
+
+[Install]
+WantedBy=default.target

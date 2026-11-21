@@ -1,0 +1,183 @@
+name: Publish Central Monitoring Hub Images
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Optional custom OCI tag (alphanumeric, dots, underscores, hyphens)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-hub-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish-hub:
+    name: Build & Publish central-monitoring-hub (+ gateway)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Validate monorepo before packaging
+        run: |
+          python -m pip install jsonschema
+          python scripts/validate-monorepo.py --strict
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: "hub/ui/package-lock.json"
+
+      - name: Install & build Hub Cockpit UI (hub/ui/dist)
+        run: |
+          if [ -f hub/ui/package-lock.json ]; then
+            npm --prefix hub/ui ci
+          else
+            npm --prefix hub/ui install
+          fi
+          npm --prefix hub/ui run build
+          test -f hub/ui/dist/index.html
+
+      - name: Compute target GHCR image references and tags
+        id: meta
+        env:
+          REPO_OWNER_RAW: ${{ github.repository_owner }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          SHORT_SHA: ${{ github.sha }}
+          CUSTOM_TAG: ${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+          OWNER="${REPO_OWNER_RAW,,}"
+          GATEWAY_IMAGE="ghcr.io/${OWNER}/central-monitoring-hub-gateway"
+          HUB_IMAGE="ghcr.io/${OWNER}/central-monitoring-hub"
+
+          TAGS=()
+          if [ -n "${CUSTOM_TAG}" ]; then
+            if [[ ! "${CUSTOM_TAG}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+              echo "Invalid custom image_tag format" >&2
+              exit 1
+            fi
+            PRIMARY_TAG="${CUSTOM_TAG}"
+            TAGS+=("${CUSTOM_TAG}")
+          elif [ "${REF_TYPE}" = "tag" ]; then
+            CLEAN_VER="${REF_NAME#v}"
+            PRIMARY_TAG="${CLEAN_VER}"
+            TAGS+=("${CLEAN_VER}" "${REF_NAME}" "latest")
+          else
+            SAFE_BRANCH="$(echo "${REF_NAME}" | tr '/:' '--' | tr -cd 'A-Za-z0-9._-')"
+            if [ "${REF_NAME}" = "main" ]; then
+              PRIMARY_TAG="1.0.0"
+              TAGS+=("1.0.0" "${SAFE_BRANCH}" "sha-${SHORT_SHA:0:7}" "latest")
+            else
+              PRIMARY_TAG="${SAFE_BRANCH}"
+              TAGS+=("${SAFE_BRANCH}" "sha-${SHORT_SHA:0:7}")
+            fi
+          fi
+
+          # Deduplicate tags preserving order
+          UNIQUE_TAGS="$(printf '%s\n' "${TAGS[@]}" | awk '!seen[$0]++' | paste -sd ',' -)"
+          echo "owner=${OWNER}" >> "${GITHUB_OUTPUT}"
+          echo "gateway_image=${GATEWAY_IMAGE}" >> "${GITHUB_OUTPUT}"
+          echo "hub_image=${HUB_IMAGE}" >> "${GITHUB_OUTPUT}"
+          echo "primary_tag=${PRIMARY_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "tags_csv=${UNIQUE_TAGS}" >> "${GITHUB_OUTPUT}"
+
+      - name: Log in to GitHub Container Registry (Docker & Buildah/Podman)
+        env:
+          GHCR_ACTOR: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_ACTOR}" --password-stdin
+          if command -v podman >/dev/null 2>&1; then
+            echo "${GHCR_TOKEN}" | podman login ghcr.io -u "${GHCR_ACTOR}" --password-stdin
+          fi
+          if command -v buildah >/dev/null 2>&1; then
+            echo "${GHCR_TOKEN}" | buildah login ghcr.io -u "${GHCR_ACTOR}" --password-stdin
+          fi
+
+      - name: Build Hub Gateway & NS8 Hub Module OCI images
+        env:
+          CONTAINER_ENGINE: docker
+          REPO_OWNER: ${{ steps.meta.outputs.owner }}
+          IMAGE_ORG: ${{ steps.meta.outputs.owner }}
+          REPOBASE: ghcr.io/${{ steps.meta.outputs.owner }}
+          IMAGE_TAG: ${{ steps.meta.outputs.primary_tag }}
+          IMAGETAG: ${{ steps.meta.outputs.primary_tag }}
+          TAG: ${{ steps.meta.outputs.primary_tag }}
+        run: bash hub/build-images.sh
+
+      - name: Tag and push images to GHCR
+        env:
+          GATEWAY_IMAGE: ${{ steps.meta.outputs.gateway_image }}
+          HUB_IMAGE: ${{ steps.meta.outputs.hub_image }}
+          PRIMARY_TAG: ${{ steps.meta.outputs.primary_tag }}
+          TAGS_CSV: ${{ steps.meta.outputs.tags_csv }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -r -a TARGET_TAGS <<< "${TAGS_CSV}"
+
+          publish_image() {
+            local repo="$1"
+            local short_name="${repo##*/}"
+
+            # Check Buildah/Podman container-storage first (standard NS8 build-images.sh), then Docker daemon
+            if command -v buildah >/dev/null 2>&1 && (
+              buildah inspect "${repo}:${PRIMARY_TAG}" >/dev/null 2>&1 ||
+              buildah inspect "${repo}:latest" >/dev/null 2>&1 ||
+              buildah inspect "localhost/${short_name}:${PRIMARY_TAG}" >/dev/null 2>&1 ||
+              buildah inspect "localhost/${short_name}:latest" >/dev/null 2>&1
+            ); then
+              local src=""
+              for candidate in "${repo}:${PRIMARY_TAG}" "${repo}:latest" "localhost/${short_name}:${PRIMARY_TAG}" "localhost/${short_name}:latest"; do
+                if buildah inspect "${candidate}" >/dev/null 2>&1; then
+                  src="${candidate}"
+                  break
+                fi
+              done
+              for t in "${TARGET_TAGS[@]}"; do
+                buildah tag "${src}" "${repo}:${t}"
+                buildah push "${repo}:${t}" "docker://${repo}:${t}"
+              done
+            elif docker image inspect "${repo}:${PRIMARY_TAG}" >/dev/null 2>&1 || docker image inspect "${repo}:latest" >/dev/null 2>&1 || docker image inspect "${short_name}:latest" >/dev/null 2>&1; then
+              local src=""
+              for candidate in "${repo}:${PRIMARY_TAG}" "${repo}:latest" "${short_name}:${PRIMARY_TAG}" "${short_name}:latest"; do
+                if docker image inspect "${candidate}" >/dev/null 2>&1; then
+                  src="${candidate}"
+                  break
+                fi
+              done
+              for t in "${TARGET_TAGS[@]}"; do
+                docker tag "${src}" "${repo}:${t}"
+                docker push "${repo}:${t}"
+              done
+            else
+              echo "Built image not found in Buildah/Podman or Docker local store for ${repo}" >&2
+              exit 1
+            fi
+          }
+
+          publish_image "${GATEWAY_IMAGE}"
+          publish_image "${HUB_IMAGE}"

@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-save-tenant-input.json",
+  "title": "central-monitoring-hub save-tenant input",
+  "description": "Creates or updates a customer tenant, site list, optional customer alert email recipients, and optional strictly isolated read-only Grafana Customer Organization.",
+  "type": "object",
+  "required": ["customer", "display_name", "sites", "customer_portal_enabled"],
+  "additionalProperties": false,
+  "properties": {
+    "customer": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$",
+      "minLength": 3,
+      "maxLength": 48,
+      "description": "Immutable tenant slug enforced as customer label and Loki X-Scope-OrgID."
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "sites": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9-]{0,46}[a-z0-9]$",
+        "minLength": 2,
+        "maxLength": 48
+      }
+    },
+    "contact_emails": {
+      "type": "array",
+      "maxItems": 25,
+      "uniqueItems": true,
+      "default": [],
+      "items": {
+        "type": "string",
+        "minLength": 5,
+        "maxLength": 254,
+        "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+      }
+    },
+    "customer_portal_enabled": {
+      "type": "boolean",
+      "default": false,
+      "description": "Provisions an isolated read-only Grafana Org backed by prom-label-proxy and X-Scope-OrgID Loki."
+    },
+    "portal_viewer_username": {
+      "type": "string",
+      "maxLength": 64,
+      "default": "",
+      "pattern": "^(|[a-zA-Z0-9._@-]{3,64})$"
+    },
+    "portal_viewer_password": {
+      "type": "string",
+      "maxLength": 256,
+      "default": "",
+      "description": "Viewer password (min 10 chars when setting/changing; empty string preserves existing password on update)."
+    },
+    "notes": {
+      "type": "string",
+      "maxLength": 1000,
+      "default": ""
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "customer_portal_enabled": { "const": true } },
+        "required": ["customer_portal_enabled"]
+      },
+      "then": {
+        "required": ["portal_viewer_username"],
+        "properties": {
+          "portal_viewer_username": { "minLength": 3 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "portal_viewer_password": { "minLength": 1 } },
+        "required": ["portal_viewer_password"]
+      },
+      "then": {
+        "properties": { "portal_viewer_password": { "minLength": 10 } }
+      }
+    }
+  ]
+}

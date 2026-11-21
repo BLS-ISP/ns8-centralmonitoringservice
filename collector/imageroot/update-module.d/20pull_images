@@ -1,0 +1,33 @@
+#!/usr/bin/env python3
+"""Pull updated Alloy and Proxmox VE Exporter container images during module updates."""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+
+ALLOY_DEFAULT = "docker.io/grafana/alloy:v1.4.2"
+PVE_DEFAULT = "docker.io/prompve/prometheus-pve-exporter:3.4.5"
+
+
+def main() -> int:
+    podman_bin = shutil.which("podman")
+    if not podman_bin:
+        return 0
+
+    images = [
+        os.environ.get("GRAFANA_ALLOY_IMAGE", ALLOY_DEFAULT),
+        os.environ.get("PROMETHEUS_PVE_EXPORTER_IMAGE", PVE_DEFAULT),
+    ]
+    for img in images:
+        res = subprocess.run([podman_bin, "pull", img], check=False)
+        if res.returncode != 0:
+            print(f"Failed to pull image {img}", file=sys.stderr)
+            return res.returncode
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

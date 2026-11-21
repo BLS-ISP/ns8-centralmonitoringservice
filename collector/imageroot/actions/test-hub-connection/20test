@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""Test HTTPS connectivity and bearer token auth against central-monitoring-hub."""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+PYPKG = Path(__file__).resolve().parents[2] / "pypkg"
+if str(PYPKG) not in sys.path:
+    sys.path.insert(0, str(PYPKG))
+
+from collector_lib.hub_probe import verify_hub_connection
+from collector_lib.runtime import get_state_dir, load_stored_auth_token
+
+
+def _normalize_hub_url(url: str) -> str:
+    return url.strip().rstrip("/").lower()
+
+
+def _read_saved_hub_url(state_dir: Path) -> str:
+    env_file = state_dir / "environment"
+    if env_file.is_file():
+        for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if line.startswith("HUB_URL="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return os.environ.get("HUB_URL", "").strip()
+
+
+def main() -> int:
+    raw_in = sys.stdin.read().strip()
+    payload = json.loads(raw_in) if raw_in else {}
+    state_dir = get_state_dir()
+
+    hub_url = str(payload.get("hub_url") or "")
+    raw_provided_token = str(payload.get("auth_token") or "")
+    tls_skip_verify = bool(payload.get("tls_skip_verify", False))
+    timeout_sec = float(os.environ.get("HUB_PROBE_TIMEOUT_SECONDS", "8.0") or 8.0)
+
+    if raw_provided_token.strip() or any(ch in raw_provided_token for ch in ("\r", "\n", "\x00")):
+        auth_token = raw_provided_token
+    else:
+        saved_hub_url = _read_saved_hub_url(state_dir)
+        if not saved_hub_url or _normalize_hub_url(hub_url) != _normalize_hub_url(saved_hub_url):
+            json.dump(
+                {
+                    "ok": False,
+                    "http_status": 0,
+                    "latency_ms": 0.0,
+                    "verified_customer": None,
+                    "message": "Enter the bearer token explicitly when testing a new or modified Hub URL.",
+                },
+                sys.stdout,
+            )
+            sys.stdout.write("\n")
+            return 0
+        auth_token = load_stored_auth_token(state_dir)
+
+    result = verify_hub_connection(
+        hub_url=hub_url,
+        auth_token=auth_token,
+        tls_skip_verify=tls_skip_verify,
+        timeout_seconds=timeout_sec,
+    )
+    json.dump(result, sys.stdout)
+    sys.stdout.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

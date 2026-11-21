@@ -1,0 +1,122 @@
+name: Publish NS8 Software Center Repository (GitHub Pages)
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: "Optional version tag to advertise in repodata.json / repomd.json (e.g. 1.0.0)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: publish-repomd-pages
+  cancel-in-progress: false
+
+jobs:
+  build-repomd:
+    name: Generate NS8 Software Center Catalog
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      pages_ready: ${{ steps.pages_state.outputs.ready }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Validate monorepo & Software Center metadata/icons
+        run: |
+          python -m pip install jsonschema
+          python scripts/validate-monorepo.py --strict
+
+      - name: Build static NS8 Software Center repository (_site)
+        env:
+          REPO_OWNER_RAW: ${{ github.repository_owner }}
+          REPO_FULL_NAME: ${{ github.repository }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION_TAG: ${{ inputs.version_tag }}
+        run: |
+          set -euo pipefail
+          OWNER="${REPO_OWNER_RAW,,}"
+          REPO_NAME="${REPO_FULL_NAME#*/}"
+
+          if [ -n "${INPUT_VERSION_TAG}" ]; then
+            if [[ ! "${INPUT_VERSION_TAG}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "Invalid version_tag input (must be valid semver, e.g. 1.0.0)" >&2
+              exit 1
+            fi
+            TARGET_TAG="${INPUT_VERSION_TAG}"
+          elif [ "${REF_TYPE}" = "tag" ]; then
+            TARGET_TAG="${REF_NAME}"
+          else
+            TARGET_TAG="1.0.0"
+          fi
+
+          python scripts/generate-repomd.py \
+            --org "${OWNER}" \
+            --tag "${TARGET_TAG}" \
+            --repo-name "${REPO_NAME}" \
+            --output-dir _site \
+            --strict-assets
+
+          test -f _site/repodata.json
+          test -f _site/repomd.json
+          test -f _site/repodata/repomd.json
+          test -f _site/central-monitoring-hub/logo.png
+          test -f _site/central-monitoring-collector/logo.png
+
+      - name: Configure GitHub Pages
+        id: pages_cfg
+        continue-on-error: true
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Record GitHub Pages availability
+        id: pages_state
+        env:
+          CFG_OUTCOME: ${{ steps.pages_cfg.outcome }}
+        run: |
+          if [ "${CFG_OUTCOME}" = "success" ]; then
+            echo "ready=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "ready=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::GitHub Pages is not enabled yet in Settings -> Pages (Source: GitHub Actions). Static NS8 Software Center catalog (_site) was built and verified cleanly."
+          fi
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy-pages:
+    name: Deploy to GitHub Pages
+    needs: build-repomd
+    if: needs.build-repomd.outputs.pages_ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy NS8 Software Center repository to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

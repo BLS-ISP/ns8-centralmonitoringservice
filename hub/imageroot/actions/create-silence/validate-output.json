@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-create-silence-output.json",
+  "title": "central-monitoring-hub create-silence output",
+  "type": "object",
+  "required": ["status", "silence_id"],
+  "additionalProperties": false,
+  "properties": {
+    "status": { "type": "string", "enum": ["ok"] },
+    "silence_id": { "type": "string", "minLength": 4 }
+  }
+}

@@ -1,0 +1,43 @@
+[Unit]
+Description=Prometheus TSDB Server (Central Monitoring Hub)
+BindsTo=central-monitoring-hub.service
+After=central-monitoring-hub.service
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+EnvironmentFile=-%E/etc/defaults.env
+EnvironmentFile=%E/state/environment
+WorkingDirectory=%E/state
+Restart=always
+RestartSec=5
+TimeoutStopSec=70
+ExecStartPre=/bin/rm -f %t/%N.pid %t/%N.cid
+ExecStart=/usr/bin/podman run \
+    --conmon-pidfile %t/%N.pid \
+    --cidfile %t/%N.cid \
+    --cgroups=no-conmon \
+    --pod-id-file %t/central-monitoring-hub.pod-id \
+    --replace -d --name prometheus \
+    --pull=missing \
+    --restart=on-failure \
+    --sdnotify=conmon \
+    --user 0:0 \
+    --volume=%E/config/prometheus:/etc/prometheus:Z \
+    --volume=%E/config/custom-rules:/etc/prometheus/custom-rules:Z \
+    --volume=prometheus-data:/prometheus:Z \
+    ${PROMETHEUS_IMAGE} \
+    --config.file=/etc/prometheus/prometheus.yml \
+    --storage.tsdb.path=/prometheus \
+    --web.listen-address=127.0.0.1:9090 \
+    --web.enable-remote-write-receiver \
+    --web.enable-lifecycle \
+    --storage.tsdb.retention.time=${RETENTION_DAYS}d \
+    $PROMETHEUS_EXTRA_ARGS
+ExecStop=/usr/bin/podman stop --ignore --cidfile %t/%N.cid -t 15
+ExecStopPost=/usr/bin/podman rm --ignore -f --cidfile %t/%N.cid
+PIDFile=%t/%N.pid
+Type=notify
+NotifyAccess=all
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,344 @@
+// ============================================================================
+// NS8 Central Monitoring Service — Standalone Grafana Alloy Config (Docker/LAN)
+// Template: shared/alloy-templates/config-docker.alloy.tmpl
+// Tenant:   {{CUSTOMER}} | Site: {{SITE}} | Collector: {{COLLECTOR_ID}}
+// Hub URL:  {{HUB_URL}}
+// Purpose:  Monitors Docker containers + Linux host + LAN Syslog (UDP/TCP 5514)
+//           + optional LAN SNMP / Proxmox / Exporter targets for non-NS8 sites.
+// ============================================================================
+
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+// ----------------------------------------------------------------------------
+// 1. Docker Host Metrics (mounted read-only under /host)
+// ----------------------------------------------------------------------------
+prometheus.exporter.unix "docker_host" {
+  procfs_path = "/host/proc"
+  sysfs_path  = "/host/sys"
+  rootfs_path = "/host/root"
+}
+
+discovery.relabel "docker_host" {
+  targets = prometheus.exporter.unix.docker_host.targets
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+
+  rule {
+    target_label = "customer"
+    replacement  = "{{CUSTOMER}}"
+  }
+
+  rule {
+    target_label = "site"
+    replacement  = "{{SITE}}"
+  }
+
+  rule {
+    target_label = "device_role"
+    replacement  = "linux"
+  }
+
+  rule {
+    target_label = "collector_id"
+    replacement  = "{{COLLECTOR_ID}}"
+  }
+}
+
+prometheus.scrape "docker_host" {
+  targets         = discovery.relabel.docker_host.output
+  job_name        = "node_exporter"
+  scrape_interval = "30s"
+  forward_to      = [prometheus.remote_write.hub.receiver]
+}
+
+// ----------------------------------------------------------------------------
+// 2. Docker Container Resource Metrics (cAdvisor)
+// ----------------------------------------------------------------------------
+prometheus.exporter.cadvisor "containers" {
+  docker_host            = "unix:///var/run/docker.sock"
+  docker_only            = true
+  store_container_labels = false
+}
+
+discovery.relabel "cadvisor_containers" {
+  targets = prometheus.exporter.cadvisor.containers.targets
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+
+  rule {
+    target_label = "customer"
+    replacement  = "{{CUSTOMER}}"
+  }
+
+  rule {
+    target_label = "site"
+    replacement  = "{{SITE}}"
+  }
+
+  rule {
+    target_label = "device_role"
+    replacement  = "linux"
+  }
+
+  rule {
+    target_label = "collector_id"
+    replacement  = "{{COLLECTOR_ID}}"
+  }
+}
+
+prometheus.scrape "cadvisor_containers" {
+  targets         = discovery.relabel.cadvisor_containers.output
+  job_name        = "cadvisor"
+  scrape_interval = "30s"
+  forward_to      = [prometheus.remote_write.hub.receiver]
+}
+
+// ----------------------------------------------------------------------------
+// 3. Docker Container Logs -> Hub Loki
+// ----------------------------------------------------------------------------
+discovery.docker "local_containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "docker_logs" {
+  targets = discovery.docker.local_containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "compose_service"
+  }
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+
+  rule {
+    target_label = "customer"
+    replacement  = "{{CUSTOMER}}"
+  }
+
+  rule {
+    target_label = "site"
+    replacement  = "{{SITE}}"
+  }
+
+  rule {
+    target_label = "device_role"
+    replacement  = "linux"
+  }
+
+  rule {
+    target_label = "collector_id"
+    replacement  = "{{COLLECTOR_ID}}"
+  }
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.docker_logs.output
+  labels     = { job = "docker-containers" }
+  forward_to = [loki.write.hub.receiver]
+}
+
+// ----------------------------------------------------------------------------
+// 4. Site LAN Syslog Receiver (UDP & TCP 5514 inside container namespace)
+//    Security: Run `chmod 0600 config.alloy` on the Docker host. In
+//    docker-compose.yml, ports default to `127.0.0.1:5514:5514/udp` & `/tcp`;
+//    bind to your private LAN IP (e.g. `192.168.1.50:5514:5514/udp`) rather
+//    than `0.0.0.0` when receiving Syslog from LAN firewalls, switches, or NAS.
+// ----------------------------------------------------------------------------
+discovery.relabel "syslog_labels" {
+  targets = []
+
+  rule {
+    source_labels = ["__syslog_message_hostname"]
+    target_label  = "instance"
+  }
+
+  rule {
+    source_labels = ["__syslog_message_severity"]
+    target_label  = "level"
+  }
+
+  rule {
+    source_labels = ["__syslog_message_app_name"]
+    target_label  = "app"
+  }
+}
+
+loki.source.syslog "lan_appliances" {
+  listener {
+    address       = "0.0.0.0:5514"
+    protocol      = "udp"
+    syslog_format = "rfc5424"
+    labels = {
+      customer     = "{{CUSTOMER}}",
+      site         = "{{SITE}}",
+      device_role  = "snmp-firewall",
+      collector_id = "{{COLLECTOR_ID}}",
+      job          = "lan-syslog",
+    }
+  }
+
+  listener {
+    address       = "0.0.0.0:5514"
+    protocol      = "tcp"
+    syslog_format = "rfc5424"
+    labels = {
+      customer     = "{{CUSTOMER}}",
+      site         = "{{SITE}}",
+      device_role  = "snmp-firewall",
+      collector_id = "{{COLLECTOR_ID}}",
+      job          = "lan-syslog",
+    }
+  }
+
+  relabel_rules = discovery.relabel.syslog_labels.rules
+  forward_to    = [loki.write.hub.receiver]
+}
+
+// ----------------------------------------------------------------------------
+// 5. Optional LAN Targets (Proxmox pve_exporter, SNMP, Windows/Linux Exporters)
+//    Uncomment and adapt IPs for customer LAN infrastructure behind NAT.
+// ----------------------------------------------------------------------------
+/*
+prometheus.scrape "lan_proxmox" {
+  targets = [
+    {
+      __address__  = "192.168.1.10:9221",
+      instance     = "pve-01.lan",
+      customer     = "{{CUSTOMER}}",
+      site         = "{{SITE}}",
+      device_role  = "proxmox",
+      collector_id = "{{COLLECTOR_ID}}",
+    },
+  ]
+  metrics_path    = "/pve"
+  params          = { target = ["192.168.1.10"], cluster = ["1"], node = ["1"] }
+  job_name        = "pve_exporter"
+  scrape_interval = "60s"
+  forward_to      = [prometheus.remote_write.hub.receiver]
+}
+
+prometheus.exporter.snmp "lan_snmp" {
+  target "core_switch" {
+    address = "192.168.1.2"
+    module  = "if_mib"
+    auth    = "public_v2"
+  }
+
+  // Note: Embedded Alloy `prometheus.exporter.snmp` uses upstream snmp_exporter's
+  // built-in `apcups` module name (NS8 Hub/Collector UI presets label this `apcupsd`).
+  target "office_ups" {
+    address = "192.168.1.20"
+    module  = "apcups"
+    auth    = "public_v2"
+  }
+}
+
+discovery.relabel "lan_snmp" {
+  targets = prometheus.exporter.snmp.lan_snmp.targets
+
+  rule {
+    source_labels = ["__param_target"]
+    target_label  = "instance"
+  }
+
+  rule {
+    target_label = "customer"
+    replacement  = "{{CUSTOMER}}"
+  }
+
+  rule {
+    target_label = "site"
+    replacement  = "{{SITE}}"
+  }
+
+  rule {
+    target_label = "device_role"
+    replacement  = "snmp-network"
+  }
+
+  rule {
+    target_label = "collector_id"
+    replacement  = "{{COLLECTOR_ID}}"
+  }
+}
+
+prometheus.scrape "lan_snmp" {
+  targets         = discovery.relabel.lan_snmp.output
+  job_name        = "snmp_exporter"
+  scrape_interval = "60s"
+  forward_to      = [prometheus.remote_write.hub.receiver]
+}
+*/
+
+// ----------------------------------------------------------------------------
+// 6. WAL-Backed Remote Delivery to Central Monitoring Hub (HTTPS + Bearer Auth)
+// ----------------------------------------------------------------------------
+prometheus.remote_write "hub" {
+  external_labels = {
+    customer     = "{{CUSTOMER}}",
+    site         = "{{SITE}}",
+    collector_id = "{{COLLECTOR_ID}}",
+  }
+
+  endpoint {
+    url          = "{{HUB_URL}}/api/v1/write"
+    bearer_token = "{{AUTH_TOKEN}}"
+
+    queue_config {
+      capacity             = 15000
+      max_shards           = 10
+      min_shards           = 1
+      max_samples_per_send = 2000
+      batch_send_deadline  = "5s"
+      min_backoff          = "500ms"
+      max_backoff          = "5m"
+      retry_on_http_429    = true
+    }
+  }
+
+  wal {
+    truncate_frequency = "2h"
+    min_keepalive_time = "5m"
+    max_keepalive_time = "8h"
+  }
+}
+
+loki.write "hub" {
+  external_labels = {
+    customer     = "{{CUSTOMER}}",
+    site         = "{{SITE}}",
+    collector_id = "{{COLLECTOR_ID}}",
+  }
+
+  endpoint {
+    url                 = "{{HUB_URL}}/loki/api/v1/push"
+    bearer_token        = "{{AUTH_TOKEN}}"
+    min_backoff_period  = "500ms"
+    max_backoff_period  = "5m"
+    max_backoff_retries = 0
+  }
+
+  wal {
+    enabled         = true
+    max_segment_age = "2h"
+  }
+}

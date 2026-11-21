@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-list-targets-input.json",
+  "title": "central-monitoring-hub list-targets input",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "customer": {
+      "type": "string",
+      "maxLength": 48,
+      "default": ""
+    },
+    "target_type": {
+      "type": "string",
+      "enum": ["", "ns8-federation", "exporter", "blackbox", "snmp"],
+      "default": ""
+    },
+    "page": { "type": "integer", "minimum": 1, "default": 1 },
+    "page_size": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 }
+  }
+}

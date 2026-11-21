@@ -1,0 +1,274 @@
+#Requires -RunAsAdministrator
+<#
+.SYNOPSIS
+  NS8 Central Monitoring Service — Idempotent Windows Server Grafana Alloy Installer
+  Template: shared/alloy-templates/install-windows.ps1.tmpl
+  Tenant:   {{CUSTOMER}} | Site: {{SITE}} | Collector: {{COLLECTOR_ID}}
+#>
+
+$ErrorActionPreference = "Stop"
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+
+$HubUrl      = "{{HUB_URL}}"
+$AuthToken   = "{{AUTH_TOKEN}}"
+$Customer    = "{{CUSTOMER}}"
+$Site        = "{{SITE}}"
+$CollectorId = "{{COLLECTOR_ID}}"
+
+$AlloyVersion = "v1.4.2"
+$ZipUrl       = "https://github.com/grafana/alloy/releases/download/$AlloyVersion/alloy-installer-windows-amd64.exe.zip"
+$InstallDir   = "C:\Program Files\GrafanaLabs\Alloy"
+$DataDir      = "C:\ProgramData\GrafanaLabs\Alloy\data"
+$StageDir     = Join-Path $env:ProgramData "GrafanaLabs\AlloyInstaller"
+$ConfigPath   = Join-Path $InstallDir "config.alloy"
+$ScriptDir    = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+function Set-StrictAdminAcl {
+    param([Parameter(Mandatory = $true)][string]$TargetPath, [bool]$IsDirectory = $false)
+    $SystemSid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-18")
+    $AdminsSid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-544")
+    if ($IsDirectory) {
+        $Acl = New-Object System.Security.AccessControl.DirectorySecurity
+        $Acl.SetAccessRuleProtection($true, $false)
+        $Flags = [System.Security.AccessControl.InheritanceFlags]"ContainerInherit,ObjectInherit"
+        $Prop  = [System.Security.AccessControl.PropagationFlags]::None
+        $Acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($SystemSid, "FullControl", $Flags, $Prop, "Allow")))
+        $Acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($AdminsSid, "FullControl", $Flags, $Prop, "Allow")))
+    } else {
+        $Acl = New-Object System.Security.AccessControl.FileSecurity
+        $Acl.SetAccessRuleProtection($true, $false)
+        $Acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($SystemSid, "FullControl", "Allow")))
+        $Acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($AdminsSid, "FullControl", "Allow")))
+    }
+    Set-Acl -Path $TargetPath -AclObject $Acl
+}
+
+Write-Host "[1/4] Checking Grafana Alloy installation..." -ForegroundColor Cyan
+$Service = Get-Service -Name "Alloy" -ErrorAction SilentlyContinue
+
+if (-not $Service -or -not (Test-Path (Join-Path $InstallDir "alloy-windows-amd64.exe"))) {
+    if (Test-Path $StageDir) {
+        Remove-Item -Recurse -Force $StageDir -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
+    Set-StrictAdminAcl -TargetPath $StageDir -IsDirectory $true
+
+    $ZipFile = Join-Path $StageDir "alloy-installer.zip"
+    Write-Host "      Downloading Grafana Alloy $AlloyVersion to protected staging directory..."
+    Invoke-WebRequest -Uri $ZipUrl -OutFile $ZipFile -UseBasicParsing
+    Expand-Archive -Path $ZipFile -DestinationPath $StageDir -Force
+
+    $InstallerExe = Join-Path $StageDir "alloy-installer-windows-amd64.exe"
+    if (-not (Test-Path $InstallerExe)) {
+        Remove-Item -Recurse -Force $StageDir -ErrorAction SilentlyContinue
+        throw "Expected installer binary missing after archive extraction: $InstallerExe"
+    }
+
+    Write-Host "      Verifying Authenticode digital signature..."
+    $Signature = Get-AuthenticodeSignature -FilePath $InstallerExe
+    if ($Signature.Status -ne "Valid") {
+        Remove-Item -Recurse -Force $StageDir -ErrorAction SilentlyContinue
+        throw "Authenticode signature verification failed for $InstallerExe (Status: $($Signature.Status)). Aborting installation."
+    }
+
+    Write-Host "      Running silent installer..."
+    $Proc = Start-Process -FilePath $InstallerExe -ArgumentList "/S" -Wait -PassThru
+    Remove-Item -Recurse -Force $StageDir -ErrorAction SilentlyContinue
+    if ($Proc.ExitCode -ne 0) {
+        throw "Grafana Alloy installer exited with code $($Proc.ExitCode)"
+    }
+} else {
+    Write-Host "      Grafana Alloy is already installed."
+}
+
+Write-Host "[2/4] Preparing persistent WAL directory ($DataDir)..." -ForegroundColor Cyan
+New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
+Set-StrictAdminAcl -TargetPath $DataDir -IsDirectory $true
+
+Write-Host "[3/4] Writing Alloy configuration ($ConfigPath) with restricted NTFS ACLs..." -ForegroundColor Cyan
+if (Test-Path $ConfigPath) {
+    $Stamp = Get-Date -Format "yyyyMMddHHmmss"
+    $BackupPath = "$ConfigPath.bak.$Stamp"
+    Copy-Item -Path $ConfigPath -Destination $BackupPath -Force
+    Set-StrictAdminAcl -TargetPath $BackupPath -IsDirectory $false
+} else {
+    New-Item -ItemType File -Force -Path $ConfigPath | Out-Null
+}
+# Lock down ACLs on target file BEFORE writing bearer token material
+Set-StrictAdminAcl -TargetPath $ConfigPath -IsDirectory $false
+
+$CoLocated1 = if ($ScriptDir) { Join-Path $ScriptDir "config.alloy" } else { "" }
+$CoLocated2 = if ($ScriptDir) { Join-Path $ScriptDir "config-windows.alloy" } else { "" }
+
+if ($CoLocated1 -and (Test-Path $CoLocated1)) {
+    Copy-Item -Path $CoLocated1 -Destination $ConfigPath -Force
+    Set-StrictAdminAcl -TargetPath $ConfigPath -IsDirectory $false
+} elseif ($CoLocated2 -and (Test-Path $CoLocated2)) {
+    Copy-Item -Path $CoLocated2 -Destination $ConfigPath -Force
+    Set-StrictAdminAcl -TargetPath $ConfigPath -IsDirectory $false
+} else {
+    $ConfigContent = @"
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+prometheus.exporter.windows "local_windows" {
+  enabled_collectors = ["cpu", "cs", "logical_disk", "memory", "net", "os", "service", "system", "textfile", "time"]
+}
+
+discovery.relabel "windows_host" {
+  targets = prometheus.exporter.windows.local_windows.targets
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+  rule {
+    target_label = "customer"
+    replacement  = "$Customer"
+  }
+  rule {
+    target_label = "site"
+    replacement  = "$Site"
+  }
+  rule {
+    target_label = "device_role"
+    replacement  = "windows"
+  }
+  rule {
+    target_label = "collector_id"
+    replacement  = "$CollectorId"
+  }
+}
+
+prometheus.scrape "windows_host" {
+  targets         = discovery.relabel.windows_host.output
+  job_name        = "windows_exporter"
+  scrape_interval = "30s"
+  scrape_timeout  = "15s"
+  forward_to      = [prometheus.remote_write.hub.receiver]
+}
+
+loki.source.windowsevent "application" {
+  eventlog_name          = "Application"
+  use_incoming_timestamp = true
+  bookmark_path          = "C:\\ProgramData\\GrafanaLabs\\Alloy\\data\\bookmark-application.xml"
+  labels = {
+    customer     = "$Customer",
+    site         = "$Site",
+    device_role  = "windows",
+    collector_id = "$CollectorId",
+    channel      = "Application",
+    job          = "windows-eventlog",
+  }
+  forward_to = [loki.process.windows_logs.receiver]
+}
+
+loki.source.windowsevent "system" {
+  eventlog_name          = "System"
+  use_incoming_timestamp = true
+  bookmark_path          = "C:\\ProgramData\\GrafanaLabs\\Alloy\\data\\bookmark-system.xml"
+  labels = {
+    customer     = "$Customer",
+    site         = "$Site",
+    device_role  = "windows",
+    collector_id = "$CollectorId",
+    channel      = "System",
+    job          = "windows-eventlog",
+  }
+  forward_to = [loki.process.windows_logs.receiver]
+}
+
+loki.source.windowsevent "security" {
+  eventlog_name          = "Security"
+  xpath_query            = "*[System[(Level=1 or Level=2 or Level=3 or EventID=4625 or EventID=4720 or EventID=4726 or EventID=4740)]]"
+  use_incoming_timestamp = true
+  bookmark_path          = "C:\\ProgramData\\GrafanaLabs\\Alloy\\data\\bookmark-security.xml"
+  labels = {
+    customer     = "$Customer",
+    site         = "$Site",
+    device_role  = "windows",
+    collector_id = "$CollectorId",
+    channel      = "Security",
+    job          = "windows-eventlog",
+  }
+  forward_to = [loki.process.windows_logs.receiver]
+}
+
+loki.process "windows_logs" {
+  stage.json {
+    expressions = {
+      level  = "levelText",
+      source = "source",
+    }
+  }
+
+  stage.labels {
+    values = {
+      level  = "",
+      source = "",
+    }
+  }
+
+  stage.static_labels {
+    values = {
+      instance = constants.hostname,
+    }
+  }
+
+  forward_to = [loki.write.hub.receiver]
+}
+
+prometheus.remote_write "hub" {
+  external_labels = {
+    customer     = "$Customer",
+    site         = "$Site",
+    device_role  = "windows",
+    collector_id = "$CollectorId",
+  }
+  endpoint {
+    url          = "$HubUrl/api/v1/write"
+    bearer_token = "$AuthToken"
+  }
+  wal {
+    truncate_frequency = "2h"
+  }
+}
+
+loki.write "hub" {
+  external_labels = {
+    customer     = "$Customer",
+    site         = "$Site",
+    collector_id = "$CollectorId",
+  }
+  endpoint {
+    url                 = "$HubUrl/loki/api/v1/push"
+    bearer_token        = "$AuthToken"
+    min_backoff_period  = "500ms"
+    max_backoff_period  = "5m"
+    max_backoff_retries = 0
+  }
+  wal {
+    enabled         = true
+    max_segment_age = "2h"
+  }
+}
+"@
+    $Utf8NoBom = New-Object System.Text.UTF8Encoding($False)
+    [System.IO.File]::WriteAllText($ConfigPath, ($ConfigContent -replace "`r`n", "`n"), $Utf8NoBom)
+    Set-StrictAdminAcl -TargetPath $ConfigPath -IsDirectory $false
+}
+
+Write-Host "[4/4] Configuring service recovery and restarting Alloy..." -ForegroundColor Cyan
+Set-Service -Name "Alloy" -StartupType Automatic
+& sc.exe failure "Alloy" reset= 86400 actions= restart/5000/restart/15000/restart/30000 | Out-Null
+Restart-Service -Name "Alloy" -Force
+Start-Sleep -Seconds 3
+
+$RunningSvc = Get-Service -Name "Alloy"
+if ($RunningSvc.Status -ne "Running") {
+    throw "Alloy Windows service failed to reach Running state (current: $($RunningSvc.Status)). Check Windows Event Viewer."
+}
+
+Write-Host "[OK] Grafana Alloy is running and streaming metrics & EventLogs to $HubUrl (customer=$Customer, site=$Site)." -ForegroundColor Green

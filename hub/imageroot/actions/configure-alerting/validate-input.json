@@ -1,0 +1,138 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-configure-alerting-input.json",
+  "title": "central-monitoring-hub configure-alerting input",
+  "description": "Configures Alertmanager multi-channel receivers (NS8 Smarthost/SMTP, Webhook/PSA, MS Teams/Slack, Ntfy/Telegram/Gotify, per-customer email routing) and enabled rule packs.",
+  "type": "object",
+  "required": [
+    "smarthost_email",
+    "webhook_psa",
+    "chat",
+    "push",
+    "customer_email_routing"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "group_wait": {
+      "type": "string",
+      "pattern": "^[0-9]+(s|m)$",
+      "default": "30s"
+    },
+    "group_interval": {
+      "type": "string",
+      "pattern": "^[0-9]+(s|m|h)$",
+      "default": "5m"
+    },
+    "repeat_interval": {
+      "type": "string",
+      "pattern": "^[0-9]+(m|h)$",
+      "default": "4h"
+    },
+    "smarthost_email": {
+      "type": "object",
+      "required": ["enabled", "use_ns8_smarthost", "from_address", "default_to_addresses"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "use_ns8_smarthost": { "type": "boolean", "default": true },
+        "smtp_host": { "type": "string", "maxLength": 255, "default": "" },
+        "smtp_port": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 587 },
+        "smtp_user": { "type": "string", "maxLength": 255, "default": "" },
+        "smtp_password": { "type": "string", "maxLength": 512, "default": "" },
+        "smtp_password_unchanged": { "type": "boolean", "default": false },
+        "smtp_tls": { "type": "boolean", "default": true },
+        "from_address": { "type": "string", "maxLength": 254 },
+        "default_to_addresses": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+          }
+        },
+        "send_resolved": { "type": "boolean", "default": true }
+      }
+    },
+    "webhook_psa": {
+      "type": "object",
+      "required": ["enabled", "url"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "url": { "type": "string", "maxLength": 1024 },
+        "auth_secret": { "type": "string", "maxLength": 512, "default": "" },
+        "auth_secret_unchanged": { "type": "boolean", "default": false },
+        "send_resolved": { "type": "boolean", "default": true }
+      }
+    },
+    "chat": {
+      "type": "object",
+      "required": ["teams_enabled", "slack_enabled"],
+      "additionalProperties": false,
+      "properties": {
+        "teams_enabled": { "type": "boolean" },
+        "teams_webhook_url": { "type": "string", "maxLength": 1024, "default": "" },
+        "teams_webhook_unchanged": { "type": "boolean", "default": false },
+        "slack_enabled": { "type": "boolean" },
+        "slack_webhook_url": { "type": "string", "maxLength": 1024, "default": "" },
+        "slack_webhook_unchanged": { "type": "boolean", "default": false },
+        "slack_channel": { "type": "string", "maxLength": 128, "default": "" },
+        "send_resolved": { "type": "boolean", "default": true }
+      }
+    },
+    "push": {
+      "type": "object",
+      "required": ["enabled", "provider"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "provider": {
+          "type": "string",
+          "enum": ["none", "ntfy", "telegram", "gotify"]
+        },
+        "min_severity": {
+          "type": "string",
+          "enum": ["warning", "critical"],
+          "default": "critical"
+        },
+        "ntfy_url": { "type": "string", "maxLength": 512, "default": "https://ntfy.sh" },
+        "ntfy_topic": { "type": "string", "maxLength": 128, "default": "" },
+        "ntfy_token": { "type": "string", "maxLength": 512, "default": "" },
+        "ntfy_token_unchanged": { "type": "boolean", "default": false },
+        "telegram_bot_token": { "type": "string", "maxLength": 256, "default": "" },
+        "telegram_bot_token_unchanged": { "type": "boolean", "default": false },
+        "telegram_chat_id": { "type": "string", "maxLength": 64, "default": "" },
+        "gotify_url": { "type": "string", "maxLength": 512, "default": "" },
+        "gotify_token": { "type": "string", "maxLength": 512, "default": "" },
+        "gotify_token_unchanged": { "type": "boolean", "default": false }
+      }
+    },
+    "customer_email_routing": {
+      "type": "object",
+      "required": ["enabled", "min_severity"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "min_severity": {
+          "type": "string",
+          "enum": ["warning", "critical"],
+          "default": "critical"
+        },
+        "send_resolved": { "type": "boolean", "default": true }
+      }
+    },
+    "enabled_rule_packs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "ns8-cluster",
+          "linux-node",
+          "windows-node",
+          "proxmox-ve",
+          "blackbox-web-ssl",
+          "snmp-network-ups"
+        ]
+      }
+    }
+  }
+}

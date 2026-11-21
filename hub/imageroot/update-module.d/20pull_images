@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+"""NS8 Rule #5: Pull updated container images during update-module (never in systemd)."""
+
+import sys
+from pathlib import Path
+
+_PYPKG = Path(__file__).resolve().parents[1] / "pypkg"
+if str(_PYPKG) not in sys.path:
+    sys.path.insert(0, str(_PYPKG))
+
+from hub_core import resolve_pinned_images, resolve_state_dir  # noqa: E402
+from hub_core.env_store import read_module_env  # noqa: E402
+
+
+def main() -> int:
+    import agent
+
+    state_dir = resolve_state_dir()
+    env = read_module_env(state_dir)
+    for env_key, default_image in resolve_pinned_images(state_dir).items():
+        image_ref = env.get(env_key) or default_image
+        agent.run_helper("podman", "pull", image_ref)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

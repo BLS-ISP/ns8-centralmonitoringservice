@@ -1,0 +1,40 @@
+[Unit]
+Description=Thanos Store Gateway for Historical S3 Blocks (Central Monitoring Hub)
+BindsTo=central-monitoring-hub.service
+After=central-monitoring-hub.service
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+EnvironmentFile=-%E/etc/defaults.env
+EnvironmentFile=%E/state/environment
+WorkingDirectory=%E/state
+Restart=always
+RestartSec=5
+TimeoutStopSec=70
+ExecStartPre=/bin/rm -f %t/%N.pid %t/%N.cid
+ExecStart=/usr/bin/podman run \
+    --conmon-pidfile %t/%N.pid \
+    --cidfile %t/%N.cid \
+    --cgroups=no-conmon \
+    --pod-id-file %t/central-monitoring-hub.pod-id \
+    --replace -d --name thanos-store \
+    --pull=missing \
+    --restart=on-failure \
+    --sdnotify=conmon \
+    --user 0:0 \
+    --volume=%E/config/thanos/objstore.yml:/etc/thanos/objstore.yml:ro,Z \
+    --volume=thanos-store-data:/var/thanos/store:Z \
+    ${THANOS_IMAGE} \
+    store \
+    --data-dir=/var/thanos/store \
+    --objstore.config-file=/etc/thanos/objstore.yml \
+    --http-address=127.0.0.1:10922 \
+    --grpc-address=127.0.0.1:10921
+ExecStop=/usr/bin/podman stop --ignore --cidfile %t/%N.cid -t 15
+ExecStopPost=/usr/bin/podman rm --ignore -f --cidfile %t/%N.cid
+PIDFile=%t/%N.pid
+Type=notify
+NotifyAccess=all
+
+[Install]
+WantedBy=default.target

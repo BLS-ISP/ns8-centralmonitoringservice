@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-delete-tenant-input.json",
+  "title": "central-monitoring-hub delete-tenant input",
+  "type": "object",
+  "required": ["customer"],
+  "additionalProperties": false,
+  "properties": {
+    "customer": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$"
+    },
+    "delete_central_targets": {
+      "type": "boolean",
+      "default": true,
+      "description": "Also remove central pull/probe targets owned by this tenant."
+    }
+  }
+}

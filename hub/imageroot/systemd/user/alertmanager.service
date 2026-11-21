@@ -1,0 +1,39 @@
+[Unit]
+Description=Prometheus Alertmanager (Central Monitoring Hub)
+BindsTo=central-monitoring-hub.service
+After=central-monitoring-hub.service
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+EnvironmentFile=-%E/etc/defaults.env
+EnvironmentFile=%E/state/environment
+WorkingDirectory=%E/state
+Restart=always
+RestartSec=5
+TimeoutStopSec=70
+ExecStartPre=/bin/rm -f %t/%N.pid %t/%N.cid
+ExecStart=/usr/bin/podman run \
+    --conmon-pidfile %t/%N.pid \
+    --cidfile %t/%N.cid \
+    --cgroups=no-conmon \
+    --pod-id-file %t/central-monitoring-hub.pod-id \
+    --replace -d --name alertmanager \
+    --pull=missing \
+    --restart=on-failure \
+    --sdnotify=conmon \
+    --user 0:0 \
+    --volume=%E/config/alertmanager:/etc/alertmanager:Z \
+    --volume=alertmanager-data:/alertmanager:Z \
+    ${ALERTMANAGER_IMAGE} \
+    --config.file=/etc/alertmanager/alertmanager.yml \
+    --storage.path=/alertmanager \
+    --web.listen-address=127.0.0.1:9093 \
+    --cluster.listen-address=
+ExecStop=/usr/bin/podman stop --ignore --cidfile %t/%N.cid -t 10
+ExecStopPost=/usr/bin/podman rm --ignore -f --cidfile %t/%N.cid
+PIDFile=%t/%N.pid
+Type=notify
+NotifyAccess=all
+
+[Install]
+WantedBy=default.target

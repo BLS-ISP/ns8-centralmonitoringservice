@@ -1,0 +1,30 @@
+# NethServer 8 Rootless Module Image: central-monitoring-hub
+FROM docker.io/library/alpine:3.20 AS staging
+
+ARG GATEWAY_IMAGE=ghcr.io/bls-isp/central-monitoring-hub-gateway:latest
+
+COPY hub/imageroot /imageroot
+COPY hub/ui/dist /ui
+COPY shared/rules /imageroot/etc/shared/rules
+COPY shared/dashboards /imageroot/etc/shared/dashboards
+COPY shared/alloy-templates /imageroot/etc/shared/alloy-templates
+
+# Stamp custom-org GATEWAY_IMAGE into defaults.env, strip any CRLF (\r), and enforce +x (NS8 Rule #8)
+RUN sed -i "s|^CENTRAL_MONITORING_HUB_GATEWAY_IMAGE=.*|CENTRAL_MONITORING_HUB_GATEWAY_IMAGE=${GATEWAY_IMAGE}|" /imageroot/etc/defaults.env && \
+    find /imageroot -name "__pycache__" -type d -exec rm -rf {} + && \
+    find /imageroot -name "*.pyc" -delete && \
+    find /imageroot -type f -exec sed -i 's/\r$//' {} + && \
+    chmod +x /imageroot/actions/*/[0-9]* /imageroot/update-module.d/* /imageroot/bin/* /imageroot/events/*/[0-9]*
+
+FROM scratch
+
+ARG GATEWAY_IMAGE=ghcr.io/bls-isp/central-monitoring-hub-gateway:latest
+
+COPY --from=staging /imageroot /imageroot
+COPY --from=staging /ui /ui
+
+LABEL org.nethserver.authorizations="traefik@node:routeadm cluster:accountconsumer" \
+      org.nethserver.tcp-ports-demand="1" \
+      org.nethserver.rootfull="0" \
+      org.nethserver.min-core="3.0.0-0" \
+      org.nethserver.images="${GATEWAY_IMAGE} quay.io/prometheus/prometheus:v2.54.1 quay.io/prometheus/alertmanager:v0.27.0 docker.io/grafana/loki:3.1.1 docker.io/grafana/grafana-oss:11.2.2 quay.io/prometheuscommunity/prom-label-proxy:v0.11.0 quay.io/prometheus/blackbox-exporter:v0.25.0 quay.io/prometheus/snmp-exporter:v0.26.0 quay.io/thanos/thanos:v0.36.1"

@@ -1,0 +1,133 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/telemetry-contract.schema.json",
+  "title": "NS8 Central Monitoring Telemetry Contract",
+  "description": "Authoritative label taxonomy, token format, and ingest verification payload shared between central-monitoring-hub, central-monitoring-collector, and standalone Grafana Alloy agents.",
+  "type": "object",
+  "definitions": {
+    "customerSlug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$",
+      "minLength": 3,
+      "maxLength": 48,
+      "description": "Strict lowercase tenant isolation identifier (3-48 chars, alphanumeric with internal hyphens)."
+    },
+    "siteSlug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,46}[a-z0-9]$",
+      "minLength": 2,
+      "maxLength": 48,
+      "description": "Lowercase customer site identifier (2-48 chars, e.g. hq, dc1, branch-berlin)."
+    },
+    "deviceRole": {
+      "type": "string",
+      "enum": [
+        "ns8",
+        "linux",
+        "windows",
+        "proxmox",
+        "web",
+        "snmp-network",
+        "snmp-ups",
+        "snmp-nas",
+        "snmp-firewall",
+        "snmp-printer"
+      ],
+      "description": "Canonical device class label used by MSP alert rule packs and Grafana starter dashboards."
+    },
+    "snmpModule": {
+      "type": "string",
+      "enum": [
+        "if_mib",
+        "apcupsd",
+        "synology",
+        "qnap",
+        "mikrotik",
+        "fortigate",
+        "printer",
+        "generic"
+      ],
+      "description": "Canonical SNMP MIB module profiles supported across Hub SNMP Exporter and Collector Alloy."
+    },
+    "collectorId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$",
+      "minLength": 3,
+      "maxLength": 64,
+      "description": "Unique identifier of the pushing collector or 'hub-central' for central pull/probe scrapes."
+    },
+    "alertSeverity": {
+      "type": "string",
+      "enum": ["warning", "critical"]
+    },
+    "alertCategory": {
+      "type": "string",
+      "enum": [
+        "cluster",
+        "compute",
+        "storage",
+        "network",
+        "power",
+        "web",
+        "backup",
+        "security"
+      ]
+    },
+    "bearerToken": {
+      "type": "string",
+      "pattern": "^cms_v1_[A-Za-z0-9_-]{32,96}$",
+      "description": "High-entropy bearer token issued by central-monitoring-hub for tenant ingest authentication."
+    },
+    "mandatoryTelemetryLabels": {
+      "type": "object",
+      "required": ["customer", "site", "device_role", "collector_id"],
+      "properties": {
+        "customer": { "$ref": "#/definitions/customerSlug" },
+        "site": { "$ref": "#/definitions/siteSlug" },
+        "device_role": { "$ref": "#/definitions/deviceRole" },
+        "collector_id": { "$ref": "#/definitions/collectorId" },
+        "instance": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "job": { "type": "string", "minLength": 1, "maxLength": 128 }
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "apiError": {
+      "type": "object",
+      "required": ["error"],
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "UNAUTHORIZED",
+                "FORBIDDEN",
+                "BAD_REQUEST",
+                "VALIDATION_ERROR",
+                "PAYLOAD_TOO_LARGE",
+                "RATE_LIMITED",
+                "UPSTREAM_UNAVAILABLE",
+                "INTERNAL_ERROR"
+              ]
+            },
+            "message": { "type": "string" },
+            "details": {}
+          }
+        }
+      }
+    }
+  },
+  "required": ["customer", "site", "device_role", "collector_id"],
+  "properties": {
+    "customer": { "$ref": "#/definitions/customerSlug" },
+    "site": { "$ref": "#/definitions/siteSlug" },
+    "device_role": { "$ref": "#/definitions/deviceRole" },
+    "collector_id": { "$ref": "#/definitions/collectorId" }
+  }
+}

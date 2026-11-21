@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""Initialize default state and environment for central-monitoring-collector."""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+PYPKG = Path(__file__).resolve().parents[2] / "pypkg"
+if str(PYPKG) not in sys.path:
+    sys.path.insert(0, str(PYPKG))
+
+import agent  # type: ignore[import-not-found]
+from collector_lib.alloy_renderer import CollectorConfig, render_collector_artifacts
+from collector_lib.runtime import atomic_write_text, build_collector_id, get_state_dir
+
+
+def main() -> int:
+    state_dir = get_state_dir()
+    module_id = os.environ.get("MODULE_ID", "central-monitoring-collector1")
+    collector_id = build_collector_id(module_id=module_id)
+
+    defaults = {
+        "CONFIGURED": "0",
+        "HUB_URL": "",
+        "CUSTOMER": "",
+        "SITE": "",
+        "COLLECTOR_ID": collector_id,
+        "COLLECT_LOCAL_NS8": "1",
+        "ENABLE_SYSLOG_RECEIVER": "0",
+        "SYSLOG_PORT": "5514",
+        "WAL_MAX_DISK_MB": "2048",
+        "TLS_SKIP_VERIFY": "0",
+        "PODMAN_SYSLOG_ARGS": "",
+    }
+    for key, val in defaults.items():
+        agent.set_env(key, val)
+    agent.dump_env()
+
+    targets_file = state_dir / "local-targets.json"
+    if not targets_file.exists():
+        atomic_write_text(targets_file, json.dumps({"targets": []}, indent=2) + "\n", mode=0o600)
+
+    cfg = CollectorConfig(
+        configured=False,
+        hub_url="",
+        auth_token="",
+        customer="",
+        site="",
+        collector_id=collector_id,
+    )
+    render_collector_artifacts(state_dir, cfg, [])
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,188 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-configure-module-input.json",
+  "title": "central-monitoring-hub configure-module input",
+  "description": "Validates module-wide FQDN, TLS, TSDB/Loki retention, Restic backup mode, local vs S3/Thanos storage backend, and NS8 LDAP/AD admin SSO settings.",
+  "type": "object",
+  "required": ["host", "lets_encrypt", "http2https", "storage_mode"],
+  "additionalProperties": false,
+  "properties": {
+    "host": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 253,
+      "pattern": "^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,63}$",
+      "description": "Public/internal FQDN registered in NS8 Traefik for Grafana UI and HTTPS telemetry ingest."
+    },
+    "lets_encrypt": {
+      "type": "boolean",
+      "description": "Request an automatic Let's Encrypt ACME certificate in NS8 Traefik."
+    },
+    "http2https": {
+      "type": "boolean",
+      "description": "Redirect plain HTTP requests to HTTPS in NS8 Traefik."
+    },
+    "retention_days": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3650,
+      "default": 30,
+      "description": "Local Prometheus TSDB retention period in days (in s3 mode, local hot cache retention while Thanos serves long-term blocks from S3)."
+    },
+    "retention_size_gb": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000,
+      "default": 50,
+      "description": "Maximum local Prometheus TSDB disk usage in GiB (0 disables size-based pruning)."
+    },
+    "loki_retention_days": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3650,
+      "default": 30,
+      "description": "Loki compactor log retention period in days."
+    },
+    "backup_include_tsdb": {
+      "type": "boolean",
+      "default": false,
+      "description": "When false (default), NS8 Restic backs up configs, tenants, tokens, rules, silences, and online SQLite grafana.db dump only; when true, raw prometheus-data and loki-data volumes are also included."
+    },
+    "storage_mode": {
+      "type": "string",
+      "enum": ["local", "s3"],
+      "default": "local",
+      "description": "Storage backend mode: 'local' (Podman volumes only) or 's3' (native Loki S3 TSDB + Thanos Sidecar/Store/Query)."
+    },
+    "s3": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": {
+        "endpoint": "",
+        "bucket": "",
+        "region": "us-east-1",
+        "access_key": "",
+        "secret_key": "",
+        "secret_key_unchanged": false,
+        "insecure": false,
+        "path_style": true
+      },
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "maxLength": 255,
+          "description": "S3/MinIO host[:port] without scheme (e.g. s3.eu-central-1.amazonaws.com or minio.lan:9000)."
+        },
+        "bucket": {
+          "type": "string",
+          "maxLength": 63,
+          "description": "Target S3 bucket name for Loki chunks/index and Thanos TSDB blocks."
+        },
+        "region": {
+          "type": "string",
+          "maxLength": 64,
+          "default": "us-east-1"
+        },
+        "access_key": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "secret_key": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "S3 secret access key. May be omitted/empty when secret_key_unchanged is true."
+        },
+        "secret_key_unchanged": {
+          "type": "boolean",
+          "default": false,
+          "description": "Preserve previously stored S3 secret key when updating other settings."
+        },
+        "insecure": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use plain HTTP instead of HTTPS when talking to an internal S3/MinIO endpoint."
+        },
+        "path_style": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use path-style S3 addressing (required for most MinIO/Ceph deployments)."
+        }
+      }
+    },
+    "ldap_enabled": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable NS8 LDAP / Active Directory login for MSP technicians into Grafana Main Org (Org 1)."
+    },
+    "ldap_domain": {
+      "type": "string",
+      "maxLength": 253,
+      "default": "",
+      "description": "NS8 user domain name discovered via agent.ldapproxy.Ldapproxy."
+    },
+    "ldap_admin_group": {
+      "type": "string",
+      "maxLength": 256,
+      "default": "Domain Admins",
+      "description": "LDAP group CN/DN mapped to Grafana Org 1 Admin role."
+    },
+    "ldap_editor_group": {
+      "type": "string",
+      "maxLength": 256,
+      "default": "",
+      "description": "Optional LDAP group CN/DN mapped to Grafana Org 1 Editor role; other authenticated LDAP users map to Viewer."
+    },
+    "grafana_admin_password": {
+      "type": "string",
+      "maxLength": 256,
+      "default": "",
+      "description": "New local Grafana Org 1 admin password (min 8 chars when non-empty; empty string keeps current password)."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "storage_mode": { "const": "s3" } },
+        "required": ["storage_mode"]
+      },
+      "then": {
+        "required": ["s3"],
+        "properties": {
+          "s3": {
+            "required": ["endpoint", "bucket", "access_key"],
+            "properties": {
+              "endpoint": { "minLength": 3, "pattern": "^[^/\\s]+$" },
+              "bucket": { "minLength": 3, "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$" },
+              "access_key": { "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "ldap_enabled": { "const": true } },
+        "required": ["ldap_enabled"]
+      },
+      "then": {
+        "required": ["ldap_domain"],
+        "properties": {
+          "ldap_domain": { "minLength": 1 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "grafana_admin_password": { "minLength": 1 }
+        },
+        "required": ["grafana_admin_password"]
+      },
+      "then": {
+        "properties": {
+          "grafana_admin_password": { "minLength": 8 }
+        }
+      }
+    }
+  ]
+}

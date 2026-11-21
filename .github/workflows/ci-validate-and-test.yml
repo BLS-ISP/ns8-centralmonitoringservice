@@ -1,0 +1,327 @@
+name: CI Validate, Build & Test
+
+on:
+  push:
+    branches:
+      - main
+      - "release/**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate-build-and-test:
+    name: Monorepo Audit, Cockpit UIs & Pytest Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Python test & validation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest pytest-asyncio jsonschema aiohttp httpx cryptography
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: "**/package-lock.json"
+
+      - name: Validate LF line endings, Draft-07 schemas & NS8 Backend/UI rules
+        run: python scripts/validate-monorepo.py --strict
+
+      - name: Install & build Hub Cockpit UI (hub/ui)
+        run: npm --prefix hub/ui ci && npm --prefix hub/ui run build
+
+      - name: Install & build Collector Cockpit UI (collector/ui)
+        run: npm --prefix collector/ui ci && npm --prefix collector/ui run build
+
+      - name: Audit Cockpit UI production dependencies
+        run: |
+          npm --prefix hub/ui audit --omit=dev --audit-level=high
+          npm --prefix collector/ui audit --omit=dev --audit-level=high
+
+      - name: Verify built Cockpit UI bundles exist
+        run: |
+          test -f hub/ui/dist/index.html
+          test -f collector/ui/dist/index.html
+
+      - name: Run Cockpit UI unit checks (if defined)
+        run: |
+          npm --prefix hub/ui test --if-present
+          npm --prefix collector/ui test --if-present
+
+      - name: Run full Python test suite
+        run: python -m pytest tests -v
+
+      - name: Re-verify zero CRLF regressions after build & test
+        run: python scripts/validate-monorepo.py --strict
+
+  validate-observability-configs:
+    name: Upstream Container Config Validation (promtool / amtool / loki / blackbox / alloy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate Prometheus alert rule packs with promtool
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/workspace:ro" \
+            -w /workspace \
+            --entrypoint promtool \
+            quay.io/prometheus/prometheus:v2.54.1 \
+            check rules shared/rules/*.yml
+
+      - name: Render real Hub, Tenancy & Collector configs via Python modules
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import sys
+          import types
+
+          repo = pathlib.Path(".").resolve()
+          sys.path.insert(0, str(repo / "hub" / "imageroot" / "pypkg"))
+          sys.path.insert(0, str(repo / "collector" / "imageroot" / "pypkg"))
+          sys.modules.setdefault("agent", types.ModuleType("agent"))
+
+          from hub_core.config_renderer import render_all_configs, render_loki_yaml
+          from hub_alerting.alertmanager_config import render_alertmanager_yaml
+          from hub_alerting.blackbox_config import render_blackbox_config
+          from hub_tenancy.store import save_tenant
+          from hub_tenancy.bundle_renderer import generate_agent_bundle
+          from collector_lib.alloy_renderer import CollectorConfig, render_alloy_river
+
+          out = pathlib.Path("/tmp/ns8-cms-ci-configs")
+          state_dir = out / "state"
+          config_dir = out / "config"
+          etc_dir = out / "etc"
+          alloy_dir = out / "alloy"
+          for d in (state_dir, config_dir, etc_dir, alloy_dir):
+              d.mkdir(parents=True, exist_ok=True)
+
+          os.environ["HUB_CONFIG_DIR"] = str(config_dir)
+          os.environ["HUB_ETC_DIR"] = str(etc_dir)
+          os.environ["HUB_SHARED_DIR"] = str(repo / "shared")
+
+          (state_dir / "environment").write_text(
+              "MODULE_ID=central-monitoring-hub1\n"
+              "TRAEFIK_HOST=monitoring.msp.example.com\n"
+              "STORAGE_MODE=local\n"
+              "LOKI_RETENTION_DAYS=30\n",
+              encoding="utf-8",
+          )
+
+          # 1. Real Hub Prometheus + Loki (local & s3) configs from hub_core.config_renderer
+          render_all_configs(state_dir)
+          (config_dir / "loki" / "loki-s3.yaml").write_text(
+              render_loki_yaml(
+                  storage_mode="s3",
+                  loki_retention_days=90,
+                  s3_endpoint="minio.internal:9000",
+                  s3_bucket="cms-logs",
+                  s3_region="eu-central-1",
+                  s3_access_key="ak",
+                  s3_secret_key="sk",
+                  s3_insecure=False,
+                  s3_path_style=True,
+              ),
+              encoding="utf-8",
+          )
+
+          # 2. Real Blackbox & Alertmanager configs from hub_alerting
+          render_blackbox_config(config_dir / "blackbox" / "blackbox.yml", state_dir=state_dir)
+          am_yaml = render_alertmanager_yaml(
+              cfg={
+                  "group_wait": "30s",
+                  "group_interval": "5m",
+                  "repeat_interval": "4h",
+                  "smarthost_email": {
+                      "enabled": True,
+                      "use_ns8_smarthost": True,
+                      "from_address": "monitoring@msp.example.com",
+                      "default_to_addresses": ["noc@msp.example.com"],
+                      "send_resolved": True,
+                  },
+                  "webhook_psa": {
+                      "enabled": True,
+                      "url": "https://psa.msp.example.com/hooks/alertmanager",
+                      "send_resolved": True,
+                  },
+                  "chat": {
+                      "teams_enabled": True,
+                      "slack_enabled": True,
+                      "slack_channel": "#ops-alerts",
+                      "send_resolved": True,
+                  },
+                  "push": {
+                      "enabled": True,
+                      "provider": "ntfy",
+                      "min_severity": "critical",
+                      "ntfy_url": "https://ntfy.sh",
+                      "ntfy_topic": "msp-noc",
+                  },
+                  "customer_email_routing": {
+                      "enabled": True,
+                      "min_severity": "critical",
+                      "send_resolved": True,
+                  },
+              },
+              secrets={
+                  "webhook_auth_secret": "psa-secret-token",
+                  "teams_webhook_url": "https://outlook.office.com/webhook/example",
+                  "slack_webhook_url": "https://hooks.slack.com/services/T000/B000/XXXX",
+              },
+              smarthost_info={
+                  "available": True,
+                  "smarthost": "10.0.2.2:25",
+                  "username": "",
+                  "password": "",
+                  "require_tls": False,
+              },
+              tenants_map={"acme-corp": {"contact_emails": ["it@acme-corp.example.com"]}},
+          )
+          (config_dir / "alertmanager" / "alertmanager.yml").write_text(am_yaml, encoding="utf-8")
+
+          # 3. Real Standalone Alloy bundles (linux, windows, docker) via hub_tenancy.bundle_renderer
+          save_tenant(
+              state_dir,
+              {
+                  "customer": "acme-corp",
+                  "display_name": "ACME Corp",
+                  "sites": ["hq"],
+                  "default_site": "hq",
+                  "contact_emails": ["it@acme-corp.example.com"],
+              },
+          )
+          for platform in ("linux", "windows", "docker"):
+              bundle = generate_agent_bundle(
+                  state_dir,
+                  customer="acme-corp",
+                  site="hq",
+                  platform=platform,
+                  hub_url="https://monitoring.msp.example.com",
+              )
+              (alloy_dir / f"standalone-{platform}.alloy").write_text(bundle["config_content"], encoding="utf-8")
+
+          # 4. Real Site Collector config.alloy via collector_lib.alloy_renderer
+          collector_river = render_alloy_river(
+              CollectorConfig(
+                  configured=True,
+                  hub_url="https://monitoring.msp.example.com",
+                  auth_token="cms_v1_0123456789abcdef0123456789abcdef01234567",
+                  customer="acme-corp",
+                  site="hq",
+                  collector_id="acme-hq-ns8",
+                  collect_local_ns8=True,
+                  enable_syslog_receiver=True,
+                  syslog_port=5514,
+                  wal_max_disk_mb=2048,
+              ),
+              targets=[
+                  {
+                      "id": "pve01",
+                      "name": "PVE-01",
+                      "target_type": "proxmox",
+                      "device_role": "proxmox",
+                      "host": "192.168.10.10",
+                      "port": 8006,
+                      "enabled": True,
+                  },
+                  {
+                      "id": "sw01",
+                      "name": "CoreSwitch",
+                      "target_type": "snmp",
+                      "device_role": "snmp-network",
+                      "host": "192.168.10.2",
+                      "port": 161,
+                      "snmp_module": "if_mib",
+                      "snmp_version": "v2c",
+                      "enabled": True,
+                  },
+                  {
+                      "id": "dc01",
+                      "name": "WinDC01",
+                      "target_type": "windows",
+                      "device_role": "windows",
+                      "host": "192.168.10.20",
+                      "port": 9182,
+                      "enabled": True,
+                  },
+              ],
+          )
+          (alloy_dir / "site-collector.alloy").write_text(collector_river, encoding="utf-8")
+          PY
+          chmod -R a+rX /tmp/ns8-cms-ci-configs
+
+      - name: Validate rendered Prometheus config with promtool
+        run: |
+          docker run --rm \
+            -v "/tmp/ns8-cms-ci-configs/config/prometheus:/etc/prometheus:ro" \
+            -v "/tmp/ns8-cms-ci-configs/config/custom-rules:/etc/prometheus/custom-rules:ro" \
+            --entrypoint promtool \
+            quay.io/prometheus/prometheus:v2.54.1 \
+            check config /etc/prometheus/prometheus.yml
+
+      - name: Validate rendered Alertmanager config with amtool
+        run: |
+          docker run --rm \
+            -v "/tmp/ns8-cms-ci-configs/config/alertmanager:/cfg:ro" \
+            --entrypoint amtool \
+            quay.io/prometheus/alertmanager:v0.27.0 \
+            check-config /cfg/alertmanager.yml
+
+      - name: Validate rendered Loki configs (local & s3 TSDB v13)
+        run: |
+          for loki_cfg in loki.yaml loki-s3.yaml; do
+            docker run --rm \
+              --tmpfs /var/lib/loki:mode=0777 \
+              -v "/tmp/ns8-cms-ci-configs/config/loki:/cfg:ro" \
+              docker.io/grafana/loki:3.1.1 \
+              -verify-config -config.file="/cfg/${loki_cfg}"
+          done
+
+      - name: Validate rendered Blackbox Exporter config
+        run: |
+          docker run --rm \
+            -v "/tmp/ns8-cms-ci-configs/config/blackbox:/cfg:ro" \
+            quay.io/prometheus/blackbox-exporter:v0.25.0 \
+            --config.check --config.file=/cfg/blackbox.yml
+
+      - name: Validate rendered Collector & Standalone Alloy configs with upstream alloy fmt
+        run: |
+          for cfg in /tmp/ns8-cms-ci-configs/alloy/*.alloy; do
+            echo "Checking Alloy syntax: $(basename "$cfg")"
+            docker run --rm \
+              -v "/tmp/ns8-cms-ci-configs/alloy:/cfg:ro" \
+              docker.io/grafana/alloy:v1.4.2 \
+              fmt "/cfg/$(basename "$cfg")" >/dev/null
+          done

@@ -1,0 +1,228 @@
+# NS8 Central Monitoring Service — SNMP Network, Firewall, UPS, NAS & Printer Alert Rules
+# Capability: telemetry-contract (shared/rules/snmp-network-ups.yml)
+
+groups:
+  - name: snmp.availability_and_network
+    interval: 30s
+    rules:
+      - alert: SnmpTargetUnreachable
+        expr: up{device_role=~"snmp-.*"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          category: network
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] SNMP-Gerät nicht erreichbar ({{ $labels.instance }})"
+          description: "Das SNMP-überwachte Gerät {{ $labels.instance }} (Rolle: {{ $labels.device_role }}, Mandant: {{ $labels.customer }}, Standort: {{ $labels.site }}) antwortet nicht per SNMP."
+
+      - alert: SnmpCriticalInterfaceDown
+        expr: >
+          (
+            (ifOperStatus{device_role=~"snmp-network|snmp-firewall", ifAlias=~"(?i).*(uplink|wan|trunk|core|isp|fw|server|nas|san|ha|crit).*"} == 2)
+            or
+            (ifOperStatus{device_role=~"snmp-network|snmp-firewall", ifName=~"(?i)(wan.*|uplink.*|po[0-9]+|bond.*|lag.*|ae[0-9]+)"} == 2)
+          )
+          and on (customer, site, instance, ifIndex)
+          (ifAdminStatus{device_role=~"snmp-network|snmp-firewall"} == 1)
+        for: 2m
+        labels:
+          severity: critical
+          category: network
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Kritisches Netzwerk-Interface Down ({{ $labels.ifName }} auf {{ $labels.instance }})"
+          description: "Das administrativ aktivierte Interface {{ $labels.ifName }} ({{ $labels.ifDescr }} / {{ $labels.ifAlias }}) auf {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) meldet Link-Down."
+
+      - alert: SnmpInterfaceHighPacketErrorRate
+        expr: >
+          sum by (customer, site, instance, ifIndex, ifName, ifDescr) (
+            rate(ifInErrors{device_role=~"snmp-network|snmp-firewall"}[5m])
+            +
+            rate(ifOutErrors{device_role=~"snmp-network|snmp-firewall"}[5m])
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+          category: network
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Hohe Paketfehlerrate auf {{ $labels.ifName }} ({{ $labels.instance }})"
+          description: "Interface {{ $labels.ifName }} ({{ $labels.ifDescr }}) auf {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) verzeichnet {{ printf \"%.2f\" $value }} Paketfehler/Sekunde."
+
+      - alert: SnmpInterfaceHighPacketDiscardRate
+        expr: >
+          sum by (customer, site, instance, ifIndex, ifName, ifDescr) (
+            rate(ifInDiscards{device_role=~"snmp-network|snmp-firewall"}[5m])
+            +
+            rate(ifOutDiscards{device_role=~"snmp-network|snmp-firewall"}[5m])
+          ) > 10
+        for: 10m
+        labels:
+          severity: warning
+          category: network
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Hohe Paketverwerfungen (Discards) auf {{ $labels.ifName }} ({{ $labels.instance }})"
+          description: "Interface {{ $labels.ifName }} ({{ $labels.ifDescr }}) auf {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) verwirft {{ printf \"%.2f\" $value }} Pakete/Sekunde."
+
+  - name: snmp.ups_and_nas
+    interval: 60s
+    rules:
+      - alert: SnmpUpsOnBattery
+        expr: >
+          (upsOutputSource == 5)
+          or
+          (upsBasicOutputStatus == 3)
+          or
+          (upsBatteryStatus == 3)
+        for: 1m
+        labels:
+          severity: critical
+          category: power
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] USV läuft auf Batterie! / UPS on battery ({{ $labels.instance }})"
+          description: "Stromausfall oder Eingangsnetzstörung am Standort {{ $labels.site }} ({{ $labels.customer }}): USV {{ $labels.instance }} versorgt die Last aus der Batterie."
+
+      - alert: SnmpUpsBatteryLow
+        expr: >
+          ((upsEstimatedChargeRemaining > 0) and (upsEstimatedChargeRemaining < 30))
+          or
+          ((upsAdvBatteryCapacity > 0) and (upsAdvBatteryCapacity < 30))
+        for: 1m
+        labels:
+          severity: critical
+          category: power
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] USV-Batterieladung kritisch (<30%) auf {{ $labels.instance }}"
+          description: "Die USV {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) hat nur noch {{ printf \"%.0f\" $value }}% Restkapazität. Geordneter Shutdown der Server droht!"
+
+      - alert: SnmpUpsReplaceBatteryNeeded
+        expr: >
+          (upsAdvBatteryReplaceIndicator == 2)
+          or
+          (upsBatteryStatus == 4)
+          or
+          (upsAlarmBatteryBad > 0)
+        for: 10m
+        labels:
+          severity: warning
+          category: power
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] USV-Batterietausch erforderlich ({{ $labels.instance }})"
+          description: "USV {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) meldet verschlissene oder defekte Akkus (Replace Battery)."
+
+      - alert: SnmpNasVolumeOrDiskDegraded
+        expr: >
+          (raidStatus{device_role="snmp-nas"} >= 11)
+          or
+          (diskStatus{device_role="snmp-nas"} >= 4)
+        for: 2m
+        labels:
+          severity: critical
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] NAS RAID-Volume oder Festplatte degradiert ({{ $labels.instance }})"
+          description: "Das NAS-System {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) meldet einen degradierten/kritischen RAID-Pool oder einen Laufwerksdefekt."
+
+      - alert: SnmpNasHighDiskTemperature
+        expr: >
+          (diskTemperature{device_role="snmp-nas"} > 55)
+          or
+          (systemTemperature{device_role="snmp-nas"} > 65)
+        for: 10m
+        labels:
+          severity: warning
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Hohe Temperatur auf NAS {{ $labels.instance }}"
+          description: "Auf NAS-System {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) wurde eine erhöhte Laufwerks-/Systemtemperatur von {{ printf \"%.0f\" $value }}°C gemessen."
+
+      - alert: SnmpQnapVolumeDegraded
+        expr: >
+          (qnapVolumeStatus{device_role="snmp-nas", qnapVolumeStatus!="", qnapVolumeStatus!~"(?i)^(ready|ok|normal).*"} == 1)
+          or
+          (qnapVolumeStatus{device_role="snmp-nas", qnapVolumeStatus=""} > 1)
+          or
+          (qnapVolumeStatus{device_role="snmp-nas", qnapVolumeStatus=""} < 0)
+        for: 2m
+        labels:
+          severity: critical
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] QNAP RAID-Volume degradiert/nicht gemountet ({{ $labels.instance }})"
+          description: "Das QNAP-NAS {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) meldet ein degradiertes oder entmountetes Speicher-Volume ({{ $labels.qnapVolumeDescr }}{{ $labels.qnapVolumeStatus }})."
+
+      - alert: SnmpQnapDiskTemperatureWarning
+        expr: >
+          (qnapDiskTemperature{device_role="snmp-nas"} > 55)
+          and
+          (qnapDiskTemperature{device_role="snmp-nas"} <= 62)
+        for: 10m
+        labels:
+          severity: warning
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] QNAP Festplattentemperatur erhöht (>55°C auf {{ $labels.instance }})"
+          description: "Festplatte {{ $labels.qnapDiskID }} im QNAP-NAS {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) hat {{ printf \"%.0f\" $value }}°C erreicht (Warnschwelle > 55°C)."
+
+      - alert: SnmpQnapDiskTemperatureCritical
+        expr: qnapDiskTemperature{device_role="snmp-nas"} > 62
+        for: 5m
+        labels:
+          severity: critical
+          category: storage
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Kritische QNAP Festplattentemperatur (>62°C auf {{ $labels.instance }})"
+          description: "Akute Überhitzungsgefahr auf QNAP-NAS {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}): Laufwerk {{ $labels.qnapDiskID }} meldet {{ printf \"%.0f\" $value }}°C (> 62°C)."
+
+  - name: snmp.printer_rfc3805
+    interval: 60s
+    rules:
+      - alert: SnmpPrinterSupplyLowWarning
+        expr: >
+          (
+            (
+              (prtMarkerSuppliesLevel{device_role=~"snmp-.*"} >= 0)
+              / ignoring (prtMarkerSuppliesDescription) group_left
+              (prtMarkerSuppliesMaxCapacity{device_role=~"snmp-.*"} > 0)
+            ) * 100 < 10
+          )
+          and
+          (
+            (
+              (prtMarkerSuppliesLevel{device_role=~"snmp-.*"} >= 0)
+              / ignoring (prtMarkerSuppliesDescription) group_left
+              (prtMarkerSuppliesMaxCapacity{device_role=~"snmp-.*"} > 0)
+            ) * 100 >= 3
+          )
+        for: 15m
+        labels:
+          severity: warning
+          category: network
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Drucker-Toner/Verbrauchsmaterial < 10% ({{ $labels.instance }})"
+          description: "Auf Netzwerkdrucker {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) liegt der Füllstand von '{{ $labels.prtMarkerSuppliesDescription }}' (Index {{ $labels.prtMarkerSuppliesIndex }}) bei {{ printf \"%.1f\" $value }}%."
+
+      - alert: SnmpPrinterSupplyCritical
+        expr: >
+          (
+            (
+              (prtMarkerSuppliesLevel{device_role=~"snmp-.*"} >= 0)
+              / ignoring (prtMarkerSuppliesDescription) group_left
+              (prtMarkerSuppliesMaxCapacity{device_role=~"snmp-.*"} > 0)
+            ) * 100
+          ) < 3
+        for: 5m
+        labels:
+          severity: critical
+          category: network
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Kritisch: Drucker-Toner fast leer (<3% auf {{ $labels.instance }})"
+          description: "Verbrauchsmaterial '{{ $labels.prtMarkerSuppliesDescription }}' (Index {{ $labels.prtMarkerSuppliesIndex }}) auf Drucker {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) ist mit {{ printf \"%.1f\" $value }}% nahezu erschöpft."
+
+      - alert: SnmpPrinterCriticalAlertActive
+        expr: prtAlertSeverityLevel{device_role=~"snmp-.*"} == 3
+        for: 5m
+        labels:
+          severity: critical
+          category: network
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Kritischer Drucker-Hardwarealarm aktiv ({{ $labels.instance }})"
+          description: "Netzwerkdrucker {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) meldet einen aktiven kritischen RFC-3805-Gerätealarm ({{ $labels.prtAlertDescription }} / Severity 3)."

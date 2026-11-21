@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-configure-module-output.json",
+  "title": "central-monitoring-hub configure-module output",
+  "type": "object",
+  "required": ["status", "grafana_url", "ingest_metrics_url", "ingest_logs_url"],
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["ok"]
+    },
+    "grafana_url": {
+      "type": "string",
+      "minLength": 8
+    },
+    "ingest_metrics_url": {
+      "type": "string",
+      "minLength": 12
+    },
+    "ingest_logs_url": {
+      "type": "string",
+      "minLength": 12
+    },
+    "storage_mode": {
+      "type": "string",
+      "enum": ["local", "s3"]
+    }
+  }
+}

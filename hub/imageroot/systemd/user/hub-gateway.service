@@ -1,0 +1,41 @@
+[Unit]
+Description=Multi-Tenant Auth & Ingest Gateway (Central Monitoring Hub)
+BindsTo=central-monitoring-hub.service
+After=central-monitoring-hub.service prometheus.service loki.service grafana.service
+Wants=prometheus.service loki.service grafana.service
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+EnvironmentFile=-%E/etc/defaults.env
+EnvironmentFile=%E/state/environment
+WorkingDirectory=%E/state
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+TimeoutStopSec=70
+ExecStartPre=/bin/rm -f %t/%N.pid %t/%N.cid
+ExecStartPre=/usr/bin/podman run --rm --pull=missing --pod-id-file %t/central-monitoring-hub.pod-id --volume=%E/bin/wait-pod-endpoints:/wait-pod-endpoints:ro,Z --entrypoint=python3 ${CENTRAL_MONITORING_HUB_GATEWAY_IMAGE} /wait-pod-endpoints http://127.0.0.1:9090/-/ready http://127.0.0.1:3100/ready http://127.0.0.1:3000/api/health
+ExecStart=/usr/bin/podman run \
+    --conmon-pidfile %t/%N.pid \
+    --cidfile %t/%N.cid \
+    --cgroups=no-conmon \
+    --pod-id-file %t/central-monitoring-hub.pod-id \
+    --replace -d --name hub-gateway \
+    --pull=missing \
+    --restart=on-failure \
+    --sdnotify=conmon \
+    --user 0:0 \
+    --env HUB_STATE_DIR=/state \
+    --env PROMETHEUS_WRITE_URL=http://127.0.0.1:9090/api/v1/write \
+    --env LOKI_PUSH_URL=http://127.0.0.1:3100/loki/api/v1/push \
+    --env GRAFANA_UPSTREAM_URL=http://127.0.0.1:3000 \
+    --volume=%E/state:/state:ro,Z \
+    ${CENTRAL_MONITORING_HUB_GATEWAY_IMAGE}
+ExecStop=/usr/bin/podman stop --ignore --cidfile %t/%N.cid -t 10
+ExecStopPost=/usr/bin/podman rm --ignore -f --cidfile %t/%N.cid
+PIDFile=%t/%N.pid
+Type=notify
+NotifyAccess=all
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import sys
+
+for _candidate in (
+    Path(__file__).resolve().parents[2] / "pypkg",
+    Path("/imageroot/pypkg"),
+):
+    if _candidate.is_dir() and str(_candidate) not in sys.path:
+        sys.path.append(str(_candidate))
+
+from hub_tenancy.grafana_sync import (  # noqa: E402
+    cleanup_deleted_tenant_if_running,
+    sync_all_orgs_if_running,
+)
+from hub_tenancy.store import delete_tenant, resolve_state_dir  # noqa: E402
+
+
+def main() -> None:
+    raw_in = sys.stdin.read().strip()
+    request = json.loads(raw_in) if raw_in else {}
+    state_dir = resolve_state_dir()
+
+    customer = str(request["customer"]).strip()
+    delete_central_targets = bool(request.get("delete_central_targets", True))
+
+    removed = delete_tenant(state_dir, customer)
+
+    if delete_central_targets:
+        try:
+            from hub_alerting.targets_manager import delete_target, list_targets
+
+            while True:
+                listed = list_targets(
+                    {"customer": customer, "page": 1, "page_size": 500},
+                    state_dir=state_dir,
+                )
+                items = listed.get("targets", [])
+                if not items:
+                    break
+                for item in items:
+                    delete_target({"id": item["id"]}, state_dir=state_dir)
+        except ImportError:
+            pass
+
+    if removed is not None:
+        cleanup_deleted_tenant_if_running(state_dir, os.environ, removed)
+        sync_all_orgs_if_running(state_dir, os.environ)
+        try:
+            from hub_alerting.alertmanager_config import sync_alertmanager
+
+            sync_alertmanager(state_dir)
+        except ImportError:
+            pass
+
+    output = {
+        "status": "ok",
+        "customer": customer,
+        "deleted": removed is not None,
+    }
+    json.dump(output, sys.stdout)
+    sys.stdout.write("\n")
+
+
+if __name__ == "__main__":
+    main()

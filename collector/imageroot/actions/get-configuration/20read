@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""Read collector configuration (with token redacted) and runtime health metrics."""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+PYPKG = Path(__file__).resolve().parents[2] / "pypkg"
+if str(PYPKG) not in sys.path:
+    sys.path.insert(0, str(PYPKG))
+
+from collector_lib.alloy_renderer import has_enabled_proxmox_targets
+from collector_lib.runtime import (
+    check_alloy_status,
+    check_pve_exporter_status,
+    compute_wal_usage_bytes,
+    get_state_dir,
+    load_stored_auth_token,
+    redact_token_prefix,
+)
+from collector_lib.targets_store import TargetsStore
+
+
+def main() -> int:
+    state_dir = get_state_dir()
+    configured = os.environ.get("CONFIGURED", "0") == "1"
+    token = load_stored_auth_token(state_dir)
+    targets = TargetsStore(state_dir).load_all()
+    pve_enabled = configured and has_enabled_proxmox_targets(targets)
+
+    syslog_port = max(1024, min(65535, int(os.environ.get("SYSLOG_PORT", "5514") or 5514)))
+    wal_max_mb = max(128, int(os.environ.get("WAL_MAX_DISK_MB", "2048") or 2048))
+
+    output = {
+        "configured": configured,
+        "hub_url": os.environ.get("HUB_URL", ""),
+        "has_auth_token": bool(token),
+        "auth_token_prefix": redact_token_prefix(token),
+        "customer": os.environ.get("CUSTOMER", ""),
+        "site": os.environ.get("SITE", ""),
+        "collector_id": os.environ.get("COLLECTOR_ID", ""),
+        "collect_local_ns8": os.environ.get("COLLECT_LOCAL_NS8", "1") == "1",
+        "enable_syslog_receiver": os.environ.get("ENABLE_SYSLOG_RECEIVER", "0") == "1",
+        "syslog_port": syslog_port,
+        "wal_max_disk_mb": wal_max_mb,
+        "tls_skip_verify": os.environ.get("TLS_SKIP_VERIFY", "0") == "1",
+        "health": {
+            "alloy_status": check_alloy_status(configured),
+            "pve_exporter_status": check_pve_exporter_status(pve_enabled),
+            "wal_usage_bytes": compute_wal_usage_bytes(state_dir),
+            "local_targets_count": len(targets),
+        },
+    }
+    json.dump(output, sys.stdout)
+    sys.stdout.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,194 @@
+// ============================================================================
+// NS8 Central Monitoring Service — Standalone Grafana Alloy Config (Linux)
+// Template: shared/alloy-templates/config-linux.alloy.tmpl
+// Tenant:   {{CUSTOMER}} | Site: {{SITE}} | Collector: {{COLLECTOR_ID}}
+// Hub URL:  {{HUB_URL}}
+// ============================================================================
+
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+// ----------------------------------------------------------------------------
+// 1. Local Linux Host Metrics (built-in node_exporter equivalent)
+// ----------------------------------------------------------------------------
+prometheus.exporter.unix "local_host" {
+  enable_collectors = ["systemd", "processes"]
+
+  textfile {
+    directory = "/var/lib/alloy/textfile"
+  }
+}
+
+discovery.relabel "linux_host" {
+  targets = prometheus.exporter.unix.local_host.targets
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+
+  rule {
+    target_label = "customer"
+    replacement  = "{{CUSTOMER}}"
+  }
+
+  rule {
+    target_label = "site"
+    replacement  = "{{SITE}}"
+  }
+
+  rule {
+    target_label = "device_role"
+    replacement  = "linux"
+  }
+
+  rule {
+    target_label = "collector_id"
+    replacement  = "{{COLLECTOR_ID}}"
+  }
+}
+
+prometheus.scrape "linux_host" {
+  targets         = discovery.relabel.linux_host.output
+  job_name        = "node_exporter"
+  scrape_interval = "30s"
+  scrape_timeout  = "10s"
+  forward_to      = [prometheus.remote_write.hub.receiver]
+}
+
+// ----------------------------------------------------------------------------
+// 2. Local Linux Systemd Journal Logs -> Hub Loki
+// ----------------------------------------------------------------------------
+discovery.relabel "journal_labels" {
+  targets = []
+
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "level"
+  }
+
+  rule {
+    source_labels = ["__journal_syslog_identifier"]
+    target_label  = "syslog_identifier"
+  }
+}
+
+loki.source.journal "systemd_journal" {
+  max_age       = "12h"
+  relabel_rules = discovery.relabel.journal_labels.rules
+  labels = {
+    customer     = "{{CUSTOMER}}",
+    site         = "{{SITE}}",
+    device_role  = "linux",
+    collector_id = "{{COLLECTOR_ID}}",
+    job          = "systemd-journal",
+  }
+  forward_to = [loki.process.linux_logs.receiver]
+}
+
+loki.process "linux_logs" {
+  stage.static_labels {
+    values = {
+      instance = constants.hostname,
+    }
+  }
+
+  forward_to = [loki.write.hub.receiver]
+}
+
+// ----------------------------------------------------------------------------
+// 3. Optional LAN SNMP & Syslog Gateway Blocks (uncomment if acting as site probe)
+//    Security: Replace 127.0.0.1 with your specific private LAN IP (e.g.
+//    192.168.1.10:5514) rather than 0.0.0.0 so WAN interfaces are never exposed.
+// ----------------------------------------------------------------------------
+/*
+loki.source.syslog "lan_syslog" {
+  listener {
+    address  = "127.0.0.1:5514"
+    protocol = "udp"
+    labels = {
+      customer     = "{{CUSTOMER}}",
+      site         = "{{SITE}}",
+      device_role  = "snmp-firewall",
+      collector_id = "{{COLLECTOR_ID}}",
+      job          = "syslog-lan",
+    }
+  }
+
+  listener {
+    address  = "127.0.0.1:5514"
+    protocol = "tcp"
+    labels = {
+      customer     = "{{CUSTOMER}}",
+      site         = "{{SITE}}",
+      device_role  = "snmp-firewall",
+      collector_id = "{{COLLECTOR_ID}}",
+      job          = "syslog-lan",
+    }
+  }
+
+  forward_to = [loki.write.hub.receiver]
+}
+*/
+
+// ----------------------------------------------------------------------------
+// 4. WAL-Backed Remote Delivery to Central Monitoring Hub (HTTPS + Bearer Auth)
+// ----------------------------------------------------------------------------
+prometheus.remote_write "hub" {
+  external_labels = {
+    customer     = "{{CUSTOMER}}",
+    site         = "{{SITE}}",
+    device_role  = "linux",
+    collector_id = "{{COLLECTOR_ID}}",
+  }
+
+  endpoint {
+    url          = "{{HUB_URL}}/api/v1/write"
+    bearer_token = "{{AUTH_TOKEN}}"
+
+    queue_config {
+      capacity             = 10000
+      max_shards           = 10
+      min_shards           = 1
+      max_samples_per_send = 2000
+      batch_send_deadline  = "5s"
+      min_backoff          = "500ms"
+      max_backoff          = "5m"
+      retry_on_http_429    = true
+    }
+  }
+
+  wal {
+    truncate_frequency = "2h"
+    min_keepalive_time = "5m"
+    max_keepalive_time = "8h"
+  }
+}
+
+loki.write "hub" {
+  external_labels = {
+    customer     = "{{CUSTOMER}}",
+    site         = "{{SITE}}",
+    collector_id = "{{COLLECTOR_ID}}",
+  }
+
+  endpoint {
+    url                 = "{{HUB_URL}}/loki/api/v1/push"
+    bearer_token        = "{{AUTH_TOKEN}}"
+    min_backoff_period  = "500ms"
+    max_backoff_period  = "5m"
+    max_backoff_retries = 0
+  }
+
+  wal {
+    enabled         = true
+    max_segment_age = "2h"
+  }
+}

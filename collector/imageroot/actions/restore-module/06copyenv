@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""Copy persisted module environment variables during Restic restore-module."""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+PYPKG = Path(__file__).resolve().parents[2] / "pypkg"
+if str(PYPKG) not in sys.path:
+    sys.path.insert(0, str(PYPKG))
+
+import agent  # type: ignore[import-not-found]
+from collector_lib.runtime import get_state_dir
+
+PRESERVED_KEYS = (
+    "CONFIGURED",
+    "HUB_URL",
+    "CUSTOMER",
+    "SITE",
+    "COLLECTOR_ID",
+    "COLLECT_LOCAL_NS8",
+    "ENABLE_SYSLOG_RECEIVER",
+    "SYSLOG_PORT",
+    "WAL_MAX_DISK_MB",
+    "TLS_SKIP_VERIFY",
+    "PODMAN_SYSLOG_ARGS",
+)
+
+
+def main() -> int:
+    raw_in = sys.stdin.read().strip()
+    payload = json.loads(raw_in) if raw_in else {}
+    original_env = payload.get("environment")
+    state_dir = get_state_dir()
+
+    if not isinstance(original_env, dict):
+        original_env = agent.read_envfile(state_dir / "environment")
+
+    for key in PRESERVED_KEYS:
+        if key in original_env:
+            agent.set_env(key, str(original_env[key]))
+    agent.dump_env()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

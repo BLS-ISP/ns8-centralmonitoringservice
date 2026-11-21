@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodic timer for NS8 textfile metrics collection (every 60s)
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=ns8-collector-textfile.service
+
+[Install]
+WantedBy=timers.target

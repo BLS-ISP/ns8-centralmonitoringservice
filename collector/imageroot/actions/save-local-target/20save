@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""Create or update a customer LAN scrape target, re-render config.alloy, and hot-reload Alloy."""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import sys
+from pathlib import Path
+
+PYPKG = Path(__file__).resolve().parents[2] / "pypkg"
+if str(PYPKG) not in sys.path:
+    sys.path.insert(0, str(PYPKG))
+
+import agent  # type: ignore[import-not-found]
+from collector_lib.alloy_renderer import (
+    CollectorConfig,
+    has_enabled_proxmox_targets,
+    render_collector_artifacts,
+)
+from collector_lib.runtime import (
+    build_collector_id,
+    get_state_dir,
+    load_stored_auth_token,
+    reload_alloy_config,
+)
+from collector_lib.targets_store import TargetsStore
+
+
+def _systemctl(*args: str) -> None:
+    if shutil.which("systemctl") and os.name != "nt":
+        agent.run_helper("systemctl", "--user", *args)
+
+
+def _fail_validation(field: str, error_code: str, value: str = "") -> int:
+    agent.set_status("validation-failed")
+    json.dump(
+        [{"field": field, "parameter": field, "value": value, "error": error_code}],
+        sys.stdout,
+    )
+    sys.stdout.write("\n")
+    return 2
+
+
+def main() -> int:
+    raw_in = sys.stdin.read().strip()
+    payload = json.loads(raw_in) if raw_in else {}
+    state_dir = get_state_dir()
+    store = TargetsStore(state_dir)
+
+    if (
+        payload.get("target_type") == "proxmox"
+        and not payload.get("id")
+        and not str(payload.get("pve_token_secret") or "").strip()
+    ):
+        return _fail_validation("pve_token_secret", "pve_token_secret_required")
+
+    try:
+        saved, created = store.save_target(payload)
+    except ValueError:
+        return _fail_validation(
+            "host",
+            "forbidden_loopback_or_link_local_host",
+            str(payload.get("host") or ""),
+        )
+
+    all_targets = store.load_all()
+
+    configured = os.environ.get("CONFIGURED", "0") == "1"
+    customer = os.environ.get("CUSTOMER", "")
+    site = os.environ.get("SITE", "")
+    module_id = os.environ.get("MODULE_ID", "central-monitoring-collector1")
+    collector_id = os.environ.get("COLLECTOR_ID", "") or build_collector_id(
+        customer, site, module_id
+    )
+
+    cfg = CollectorConfig(
+        configured=configured,
+        hub_url=os.environ.get("HUB_URL", ""),
+        auth_token=load_stored_auth_token(state_dir),
+        customer=customer,
+        site=site,
+        collector_id=collector_id,
+        collect_local_ns8=os.environ.get("COLLECT_LOCAL_NS8", "1") == "1",
+        enable_syslog_receiver=os.environ.get("ENABLE_SYSLOG_RECEIVER", "0") == "1",
+        syslog_port=int(os.environ.get("SYSLOG_PORT", "5514") or 5514),
+        wal_max_disk_mb=int(os.environ.get("WAL_MAX_DISK_MB", "2048") or 2048),
+        tls_skip_verify=os.environ.get("TLS_SKIP_VERIFY", "0") == "1",
+    )
+    render_collector_artifacts(state_dir, cfg, all_targets)
+
+    if configured:
+        if has_enabled_proxmox_targets(all_targets):
+            _systemctl("enable", "pve-exporter.service")
+            _systemctl("restart", "pve-exporter.service")
+        else:
+            _systemctl("disable", "--now", "pve-exporter.service")
+        reload_alloy_config()
+
+    json.dump({"status": "ok", "id": saved["id"], "created": created}, sys.stdout)
+    sys.stdout.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

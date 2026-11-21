@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/collector-save-local-target-output.json",
+  "title": "central-monitoring-collector save-local-target output",
+  "type": "object",
+  "required": ["status", "id", "created"],
+  "additionalProperties": false,
+  "properties": {
+    "status": { "type": "string", "enum": ["ok"] },
+    "id": { "type": "string", "minLength": 3 },
+    "created": { "type": "boolean" }
+  }
+}

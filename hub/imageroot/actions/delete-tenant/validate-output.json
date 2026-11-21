@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-delete-tenant-output.json",
+  "title": "central-monitoring-hub delete-tenant output",
+  "type": "object",
+  "required": ["status", "customer", "deleted"],
+  "additionalProperties": false,
+  "properties": {
+    "status": { "type": "string", "enum": ["ok"] },
+    "customer": { "type": "string" },
+    "deleted": { "type": "boolean" }
+  }
+}
