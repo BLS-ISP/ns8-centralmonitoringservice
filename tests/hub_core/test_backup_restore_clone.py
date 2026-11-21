@@ -178,8 +178,12 @@ def test_dump_state_podman_exec_avoids_world_readable_tmp_and_clone_syncs_orgs(
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/podman" if name == "podman" else None)
     res = dump_state(ns8_env.state_dir, runner=fake_runner)
     assert res["grafana_db_dumped"] is True
+    host_bak_str = str(ns8_env.state_dir / "grafana.db.bak")
     for cmd in recorded_cmds:
-        assert not any("/tmp/" in part for part in cmd), f"Forbidden /tmp path in podman backup cmd: {cmd}"
+        container_parts = [part for part in cmd if part != host_bak_str]
+        assert not any("/tmp/" in part for part in container_parts), (
+            f"Forbidden container /tmp path in podman backup cmd: {cmd}"
+        )
     assert any("/var/lib/grafana/.grafana.db.bak" in part for cmd in recorded_cmds for part in cmd)
 
     # Verify clone-module/50configure invokes sync_all_orgs_if_running after rotating GRAFANA_SECRET_KEY

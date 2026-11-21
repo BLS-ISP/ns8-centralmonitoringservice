@@ -78,13 +78,16 @@ def collect_storage_usage_bytes(state_dir: Path) -> dict[str, int]:
         for vol_name, current in list(volume_dirs.items()):
             if current is not None:
                 continue
-            proc = subprocess.run(
-                ["podman", "volume", "inspect", "--format", "{{.Mountpoint}}", vol_name],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=2,
-            )
+            try:
+                proc = subprocess.run(
+                    ["podman", "volume", "inspect", "--format", "{{.Mountpoint}}", vol_name],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=2,
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
             if proc.returncode == 0 and proc.stdout.strip():
                 volume_dirs[vol_name] = Path(proc.stdout.strip())
 

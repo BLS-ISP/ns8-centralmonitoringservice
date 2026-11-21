@@ -180,7 +180,7 @@ groups:
           (
             (
               (prtMarkerSuppliesLevel{device_role=~"snmp-.*"} >= 0)
-              / ignoring (prtMarkerSuppliesDescription) group_left
+              / ignoring (prtMarkerSuppliesDescription) group_left ()
               (prtMarkerSuppliesMaxCapacity{device_role=~"snmp-.*"} > 0)
             ) * 100 < 10
           )
@@ -188,7 +188,7 @@ groups:
           (
             (
               (prtMarkerSuppliesLevel{device_role=~"snmp-.*"} >= 0)
-              / ignoring (prtMarkerSuppliesDescription) group_left
+              / ignoring (prtMarkerSuppliesDescription) group_left ()
               (prtMarkerSuppliesMaxCapacity{device_role=~"snmp-.*"} > 0)
             ) * 100 >= 3
           )
@@ -205,7 +205,7 @@ groups:
           (
             (
               (prtMarkerSuppliesLevel{device_role=~"snmp-.*"} >= 0)
-              / ignoring (prtMarkerSuppliesDescription) group_left
+              / ignoring (prtMarkerSuppliesDescription) group_left ()
               (prtMarkerSuppliesMaxCapacity{device_role=~"snmp-.*"} > 0)
             ) * 100
           ) < 3

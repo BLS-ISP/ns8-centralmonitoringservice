@@ -1083,7 +1083,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "((prtMarkerSuppliesLevel{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} >= 0) / ignoring (prtMarkerSuppliesDescription) group_left (prtMarkerSuppliesMaxCapacity{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} > 0)) * 100",
+          "expr": "((prtMarkerSuppliesLevel{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} >= 0) / ignoring (prtMarkerSuppliesDescription) group_left () (prtMarkerSuppliesMaxCapacity{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} > 0)) * 100",
           "legendFormat": "Toner % {{instance}} {{prtMarkerSuppliesDescription}}",
           "range": true,
           "instant": false,
