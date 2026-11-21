@@ -46,4 +46,10 @@ RUN find /app -name "__pycache__" -type d -exec rm -rf {} + && \
 USER 10001
 EXPOSE 8080
 
+LABEL org.opencontainers.image.title="Central Monitoring Hub Gateway" \
+      org.opencontainers.image.description="Multi-tenant Snappy/Protobuf and Loki auth/stamping gateway for NS8 Central Monitoring Hub" \
+      org.opencontainers.image.vendor="BLS-ISP" \
+      org.opencontainers.image.licenses="GPL-3.0-or-later" \
+      org.opencontainers.image.source="https://github.com/BLS-ISP/ns8-centralmonitoringservice"
+
 ENTRYPOINT ["python", "-m", "hub_gateway.app"]

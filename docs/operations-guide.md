@@ -117,8 +117,11 @@ flowchart TD
 
 ### 4.2 Variante A: Kundenstandort MIT eigenem NethServer 8
 
-1. **Installation per 1-Klick im NS8 Software Center oder per CLI:**
-   - **Software Center (empfohlen für Flotten-Updates):** Unter **Einstellungen -> Software-Repositorys** einmalig die GitHub-Pages-Repository-URL `https://bls-isp.github.io/ns8-centralmonitoringservice/` hinterlegen und **Central Monitoring Collector** direkt über das Software Center installieren.
+1. **Installation per 1-Klick im NS8 Software Center (`BLS-ISP/ns8-nethforge`) oder per CLI:**
+   - **Software Center (empfohlen für Flotten-Updates, identisch für Hub & Collector):** Im NS8 Cluster-Admin unter **Einstellungen -> Software-Repositorys -> Repository hinzufügen** einmalig das zentrale BLS-ISP-Repository eintragen:
+     - **Name:** `bls-isp`
+     - **URL:** `https://raw.githubusercontent.com/BLS-ISP/ns8-nethforge/repomd/ns8/updates/`
+     Danach **Central Monitoring Collector** (bzw. auf dem zentralen MSP-Cluster **Central Monitoring Hub**) direkt über das Software Center installieren.
    - **Alternativ per CLI:**
      ```bash
      add-module ghcr.io/bls-isp/central-monitoring-collector:latest 1

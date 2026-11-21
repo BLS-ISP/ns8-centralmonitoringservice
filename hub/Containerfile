@@ -23,8 +23,16 @@ ARG GATEWAY_IMAGE=ghcr.io/bls-isp/central-monitoring-hub-gateway:latest
 COPY --from=staging /imageroot /imageroot
 COPY --from=staging /ui /ui
 
-LABEL org.nethserver.authorizations="traefik@node:routeadm cluster:accountconsumer" \
+LABEL org.opencontainers.image.title="Central Monitoring Hub" \
+      org.opencontainers.image.description="Multi-tenant MSP monitoring, logging, alerting, and Grafana portal hub for NethServer 8, Linux, Windows, Proxmox VE, Web/SSL, and SNMP infrastructure" \
+      org.opencontainers.image.vendor="BLS-ISP" \
+      org.opencontainers.image.licenses="GPL-3.0-or-later" \
+      org.opencontainers.image.source="https://github.com/BLS-ISP/ns8-centralmonitoringservice" \
+      org.nethserver.authorizations="traefik@node:routeadm cluster:accountconsumer" \
       org.nethserver.tcp-ports-demand="1" \
       org.nethserver.rootfull="0" \
-      org.nethserver.min-core="3.0.0-0" \
+      org.nethserver.min-core="3.0.0" \
+      org.nethserver.volumes="prometheus-data loki-data alertmanager-data grafana-data" \
       org.nethserver.images="${GATEWAY_IMAGE} quay.io/prometheus/prometheus:v2.54.1 quay.io/prometheus/alertmanager:v0.27.0 docker.io/grafana/loki:3.1.1 docker.io/grafana/grafana-oss:11.2.2 quay.io/prometheuscommunity/prom-label-proxy:v0.11.0 quay.io/prometheus/blackbox-exporter:v0.25.0 quay.io/prometheus/snmp-exporter:v0.26.0 quay.io/thanos/thanos:v0.36.1"
+
+ENTRYPOINT [ "/" ]

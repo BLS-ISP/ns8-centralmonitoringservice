@@ -37,16 +37,19 @@ MODULE_SPECS: tuple[dict[str, Any], ...] = (
         "dir": "hub",
         "fallback_metadata": {
             "name": "Central Monitoring Hub",
+            "upstream_name": "Prometheus, Loki, Alertmanager & Grafana",
             "description": {
                 "en": "Multi-tenant MSP monitoring, logging, alerting, and Grafana portal hub for NethServer 8, Linux, Windows, Proxmox VE, Web/SSL, and SNMP infrastructure.",
                 "de": "Mandantenfähiger MSP-Monitoring-, Logging-, Alerting- und Grafana-Portal-Hub für NethServer 8, Linux, Windows, Proxmox VE, Web/SSL und SNMP-Infrastrukturen.",
             },
             "categories": ["monitoring", "administration"],
-            "authors": [{"name": "BLS-ISP Operations Engineering", "email": "monitoring@bls-isp.net"}],
+            "authors": [{"name": "BLS-ISP", "email": "info@bls-isp.de"}],
             "docs": {
                 "documentation_url": "https://github.com/BLS-ISP/ns8-centralmonitoringservice#readme",
                 "bug_url": "https://github.com/BLS-ISP/ns8-centralmonitoringservice/issues",
                 "code_url": "https://github.com/BLS-ISP/ns8-centralmonitoringservice",
+                "terms_url": "https://github.com/BLS-ISP/ns8-centralmonitoringservice/blob/main/LICENSE",
+                "relnotes_url": "https://github.com/BLS-ISP/ns8-centralmonitoringservice/releases",
             },
         },
         "fallback_rgb": (15, 98, 254),
@@ -56,16 +59,19 @@ MODULE_SPECS: tuple[dict[str, Any], ...] = (
         "dir": "collector",
         "fallback_metadata": {
             "name": "Central Monitoring Collector",
+            "upstream_name": "Grafana Alloy & Prometheus Exporters",
             "description": {
                 "en": "Lightweight rootless Grafana Alloy telemetry & log collector for customer NethServer 8 clusters and LAN infrastructure (Proxmox VE, Windows, Linux, SNMP v2c/v3, Syslog) with offline WAL buffering.",
                 "de": "Leichtgewichtiger Rootless-Grafana-Alloy-Telemetrie- und Log-Collector für Kunden-NethServer-8-Cluster und LAN-Infrastrukturen (Proxmox VE, Windows, Linux, SNMP v2c/v3, Syslog) mit Offline-WAL-Pufferung.",
             },
             "categories": ["monitoring", "administration"],
-            "authors": [{"name": "BLS-ISP Operations Engineering", "email": "monitoring@bls-isp.net"}],
+            "authors": [{"name": "BLS-ISP", "email": "info@bls-isp.de"}],
             "docs": {
                 "documentation_url": "https://github.com/BLS-ISP/ns8-centralmonitoringservice#readme",
                 "bug_url": "https://github.com/BLS-ISP/ns8-centralmonitoringservice/issues",
                 "code_url": "https://github.com/BLS-ISP/ns8-centralmonitoringservice",
+                "terms_url": "https://github.com/BLS-ISP/ns8-centralmonitoringservice/blob/main/LICENSE",
+                "relnotes_url": "https://github.com/BLS-ISP/ns8-centralmonitoringservice/releases",
             },
         },
         "fallback_rgb": (0, 157, 154),
@@ -297,14 +303,20 @@ def generate_repository(
         docs_obj.setdefault("bug_url", f"{code_url}/issues")
         docs_obj["code_url"] = code_url
 
-        mod_out_metadata = {
+        mod_out_metadata: dict[str, Any] = {
             "name": meta["name"],
-            "description": meta["description"],
-            "categories": list(meta.get("categories") or ["monitoring"]),
-            "authors": list(meta.get("authors") or []),
-            "docs": docs_obj,
-            "source": source_image,
         }
+        if meta.get("upstream_name"):
+            mod_out_metadata["upstream_name"] = meta["upstream_name"]
+        mod_out_metadata.update(
+            {
+                "description": meta["description"],
+                "categories": list(meta.get("categories") or ["monitoring"]),
+                "authors": list(meta.get("authors") or []),
+                "docs": docs_obj,
+                "source": source_image,
+            }
+        )
 
         for base in (output_dir / mod_id, repodata_subdir / mod_id):
             base.mkdir(parents=True, exist_ok=True)

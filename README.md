@@ -108,13 +108,16 @@ flowchart LR
 
 ## Installation on NethServer 8
 
-### Option A: 1-Click Installation via NS8 Software Center (GitHub Pages Repository)
+### Option A: 1-Click Installation via NS8 Software Center (`BLS-ISP/ns8-nethforge`)
 
-Both modules can be installed and updated graphically from the **NethServer 8 Software Center**:
+Both modules are published in the central **BLS-ISP NethServer 8 Software Repository** ([`BLS-ISP/ns8-nethforge`](https://github.com/BLS-ISP/ns8-nethforge)) and can be installed and updated graphically from the **NethServer 8 Software Center**:
 
-1. In **NS8 Cluster-Admin**, open **Settings -> Software repositories -> Add repository**:
-   - **Name:** `central-monitoring`
-   - **URL:** `https://bls-isp.github.io/ns8-centralmonitoringservice/`
+1. In the **NethServer 8 Cluster Admin** UI, navigate to **Settings -> Software repositories -> Add repository**:
+   - **Name:** `bls-isp`
+   - **URL:**
+     ```text
+     https://raw.githubusercontent.com/BLS-ISP/ns8-nethforge/repomd/ns8/updates/
+     ```
 2. Open **Software Center** and install **Central Monitoring Hub** (on the central MSP cluster) or **Central Monitoring Collector** (on customer NS8 clusters).
 
 ### Option B: Direct CLI Installation (`add-module`)
