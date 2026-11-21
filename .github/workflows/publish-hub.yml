@@ -143,25 +143,8 @@ jobs:
             local repo="$1"
             local short_name="${repo##*/}"
 
-            # Check Buildah/Podman container-storage first (standard NS8 build-images.sh), then Docker daemon
-            if command -v buildah >/dev/null 2>&1 && (
-              buildah inspect "${repo}:${PRIMARY_TAG}" >/dev/null 2>&1 ||
-              buildah inspect "${repo}:latest" >/dev/null 2>&1 ||
-              buildah inspect "localhost/${short_name}:${PRIMARY_TAG}" >/dev/null 2>&1 ||
-              buildah inspect "localhost/${short_name}:latest" >/dev/null 2>&1
-            ); then
-              local src=""
-              for candidate in "${repo}:${PRIMARY_TAG}" "${repo}:latest" "localhost/${short_name}:${PRIMARY_TAG}" "localhost/${short_name}:latest"; do
-                if buildah inspect "${candidate}" >/dev/null 2>&1; then
-                  src="${candidate}"
-                  break
-                fi
-              done
-              for t in "${TARGET_TAGS[@]}"; do
-                buildah tag "${src}" "${repo}:${t}"
-                buildah push "${repo}:${t}" "docker://${repo}:${t}"
-              done
-            elif docker image inspect "${repo}:${PRIMARY_TAG}" >/dev/null 2>&1 || docker image inspect "${repo}:latest" >/dev/null 2>&1 || docker image inspect "${short_name}:latest" >/dev/null 2>&1; then
+            # Check local Docker daemon store first (used when CONTAINER_ENGINE=docker), then Podman/Buildah local storage
+            if docker image inspect "${repo}:${PRIMARY_TAG}" >/dev/null 2>&1 || docker image inspect "${repo}:latest" >/dev/null 2>&1 || docker image inspect "${short_name}:latest" >/dev/null 2>&1; then
               local src=""
               for candidate in "${repo}:${PRIMARY_TAG}" "${repo}:latest" "${short_name}:${PRIMARY_TAG}" "${short_name}:latest"; do
                 if docker image inspect "${candidate}" >/dev/null 2>&1; then
@@ -173,8 +156,25 @@ jobs:
                 docker tag "${src}" "${repo}:${t}"
                 docker push "${repo}:${t}"
               done
+            elif command -v podman >/dev/null 2>&1 && (
+              podman image exists "${repo}:${PRIMARY_TAG}" ||
+              podman image exists "${repo}:latest" ||
+              podman image exists "localhost/${short_name}:${PRIMARY_TAG}" ||
+              podman image exists "localhost/${short_name}:latest"
+            ); then
+              local src=""
+              for candidate in "${repo}:${PRIMARY_TAG}" "${repo}:latest" "localhost/${short_name}:${PRIMARY_TAG}" "localhost/${short_name}:latest"; do
+                if podman image exists "${candidate}"; then
+                  src="${candidate}"
+                  break
+                fi
+              done
+              for t in "${TARGET_TAGS[@]}"; do
+                buildah tag "${src}" "${repo}:${t}"
+                buildah push "${repo}:${t}" "docker://${repo}:${t}"
+              done
             else
-              echo "Built image not found in Buildah/Podman or Docker local store for ${repo}" >&2
+              echo "Built image not found in Docker or Podman/Buildah local store for ${repo}" >&2
               exit 1
             fi
           }

@@ -172,7 +172,9 @@ def test_dump_state_podman_exec_avoids_world_readable_tmp_and_clone_syncs_orgs(
     def fake_runner(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         recorded_cmds.append(list(cmd))
         if cmd[:3] == ["podman", "cp", "grafana:/var/lib/grafana/.grafana.db.bak"]:
-            Path(cmd[3]).write_bytes(b"sqlite-dump-bytes")
+            with sqlite3.connect(cmd[3]) as conn:
+                conn.execute("CREATE TABLE IF NOT EXISTS org (id INTEGER PRIMARY KEY, name TEXT)")
+                conn.commit()
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/podman" if name == "podman" else None)
@@ -187,6 +189,7 @@ def test_dump_state_podman_exec_avoids_world_readable_tmp_and_clone_syncs_orgs(
     assert any("/var/lib/grafana/.grafana.db.bak" in part for cmd in recorded_cmds for part in cmd)
 
     # Verify clone-module/50configure invokes sync_all_orgs_if_running after rotating GRAFANA_SECRET_KEY
+    monkeypatch.setenv("GRAFANA_DB_PATH", str(ns8_env.install_dir / "volumes" / "grafana.db"))
     synced: list[str] = []
     tenancy_pkg = types.ModuleType("hub_tenancy")
     graf_mod = types.ModuleType("hub_tenancy.grafana_sync")

@@ -279,6 +279,7 @@ jobs:
               ],
           )
           (alloy_dir / "site-collector.alloy").write_text(collector_river, encoding="utf-8")
+          (config_dir / "prometheus" / "custom-rules").mkdir(parents=True, exist_ok=True)
           PY
           chmod -R a+rX /tmp/ns8-cms-ci-configs
 
@@ -286,7 +287,6 @@ jobs:
         run: |
           docker run --rm \
             -v "/tmp/ns8-cms-ci-configs/config/prometheus:/etc/prometheus:ro" \
-            -v "/tmp/ns8-cms-ci-configs/config/custom-rules:/etc/prometheus/custom-rules:ro" \
             --entrypoint promtool \
             quay.io/prometheus/prometheus:v2.54.1 \
             check config /etc/prometheus/prometheus.yml
