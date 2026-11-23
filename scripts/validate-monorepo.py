@@ -30,11 +30,13 @@ sys.dont_write_bytecode = True
 import argparse
 import ast
 import importlib.util
+import io
 import json
 from pathlib import Path
 import re
 import struct
 import tempfile
+import tokenize
 from typing import Any
 import zlib
 
@@ -208,6 +210,214 @@ def is_text_candidate(path: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _slice_source_span(
+    lines: list[str],
+    start: tuple[int, int],
+    end: tuple[int, int],
+) -> str:
+    sline, scol = start
+    eline, ecol = end
+    if sline < 1 or eline > len(lines) or sline > eline:
+        return ""
+    if sline == eline:
+        return lines[sline - 1][scol:ecol]
+    chunks = [lines[sline - 1][scol:]]
+    for mid in range(sline, eline - 1):
+        chunks.append(lines[mid])
+    chunks.append(lines[eline - 1][:ecol])
+    return "".join(chunks)
+
+
+def _scan_pep701_fstrings(text: str) -> list[str]:
+    """Detect Python 3.12+ PEP 701 f-string constructs even when run on Python 3.12+."""
+    fstring_start = getattr(tokenize, "FSTRING_START", None)
+    fstring_middle = getattr(tokenize, "FSTRING_MIDDLE", None)
+    fstring_end = getattr(tokenize, "FSTRING_END", None)
+    if fstring_start is None:
+        return []
+
+    errors: list[str] = []
+    lines = text.splitlines(keepends=True)
+    stack: list[dict[str, Any]] = []
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+    except tokenize.TokenError as exc:
+        return [f"tokenize error: {exc}"]
+
+    for tok in tokens:
+        ttype, tstr, start_pos, end_pos, _ = tok
+        sline = start_pos[0]
+
+        if ttype == fstring_start:
+            idx = 0
+            while idx < len(tstr) and tstr[idx] not in ('"', "'"):
+                idx += 1
+            qpart = tstr[idx:]
+            triple = len(qpart) == 3
+            qchar = qpart[0] if qpart else '"'
+            for outer in stack:
+                if outer["expr_depth"] > 0:
+                    outer_q = outer["quote"]
+                    outer_qpart = outer_q * (3 if outer["triple"] else 1)
+                    if qpart == outer_qpart or (not outer["triple"] and qchar == outer_q):
+                        errors.append(
+                            f"line {sline}: PEP 701 nested f-string reuses outer quote {outer_q!r}"
+                        )
+                        break
+            stack.append(
+                {
+                    "quote": qchar,
+                    "triple": triple,
+                    "expr_depth": 0,
+                    "expr_open_end": None,
+                }
+            )
+            continue
+
+        if ttype == fstring_end:
+            if stack:
+                stack.pop()
+            continue
+
+        if ttype == fstring_middle or not stack:
+            continue
+
+        top = stack[-1]
+        if ttype == tokenize.OP and tstr == "{" and top["expr_depth"] == 0:
+            top["expr_depth"] = 1
+            top["expr_open_end"] = end_pos
+            continue
+
+        if top["expr_depth"] > 0:
+            if ttype == tokenize.OP:
+                if tstr in ("{", "(", "["):
+                    top["expr_depth"] += 1
+                elif tstr in ("}", ")", "]"):
+                    top["expr_depth"] -= 1
+                    if top["expr_depth"] == 0:
+                        open_end = top.get("expr_open_end")
+                        if open_end is not None:
+                            raw_expr = _slice_source_span(lines, open_end, start_pos)
+                            if "\\" in raw_expr:
+                                open_line = open_end[0]
+                                errors.append(
+                                    f"line {open_line}: PEP 701 backslash inside f-string expression"
+                                )
+                        top["expr_open_end"] = None
+                        continue
+
+            if ttype == tokenize.COMMENT:
+                errors.append(f"line {sline}: PEP 701 comment inside f-string expression")
+            if ttype in (tokenize.NL, tokenize.NEWLINE) and not top["triple"]:
+                errors.append(
+                    f"line {sline}: PEP 701 newline inside single-quoted f-string expression"
+                )
+            if ttype == tokenize.STRING:
+                idx = 0
+                while idx < len(tstr) and tstr[idx] not in ('"', "'"):
+                    idx += 1
+                tail = tstr[idx:]
+                qpart = tail[:3] if tail[:3] in ('"""', "'''") else tail[:1]
+                qchar = qpart[0] if qpart else ""
+                outer_q = top["quote"]
+                if not top["triple"] and qchar == outer_q:
+                    errors.append(
+                        f"line {sline}: PEP 701 string literal inside f-string reuses outer quote {outer_q!r}"
+                    )
+                elif top["triple"] and qpart == outer_q * 3:
+                    errors.append(
+                        f"line {sline}: PEP 701 triple-quoted string inside f-string reuses outer triple quote"
+                    )
+
+    return errors
+
+
+def _validate_python_39_compat(
+    path: Path,
+    text: str,
+    root: Path,
+    report: ValidationReport,
+) -> None:
+    """Enforce Rocky Linux 9 (/usr/bin/python3 = Python 3.9) grammar & runtime compatibility."""
+    rel_path = rel(path, root)
+    report.bump("py39_compat")
+
+    try:
+        tree = ast.parse(text, filename=rel_path, feature_version=(3, 9))
+    except SyntaxError as exc:
+        report.error("PY39-COMPAT", f"{rel_path}:{exc.lineno}: Python 3.9 syntax error: {exc.msg}")
+        return
+
+    for fstr_err in _scan_pep701_fstrings(text):
+        report.error("PY39-COMPAT", f"{rel_path}: {fstr_err}")
+
+    requires_future_annotations = (
+        rel_path.startswith("hub/imageroot/")
+        or rel_path.startswith("collector/imageroot/")
+        or rel_path.startswith("hub/gateway/")
+    )
+    if requires_future_annotations:
+        has_future_annotations = any(
+            isinstance(stmt, ast.ImportFrom)
+            and stmt.module == "__future__"
+            and any(alias.name == "annotations" for alias in stmt.names)
+            for stmt in tree.body
+        )
+        if not has_future_annotations:
+            report.error(
+                "PY39-COMPAT",
+                f"{rel_path} must include 'from __future__ import annotations' for Python 3.9 runtime safety",
+            )
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func_name = ""
+            if isinstance(node.func, ast.Attribute):
+                func_name = node.func.attr
+            elif isinstance(node.func, ast.Name):
+                func_name = node.func.id
+
+            if func_name == "dataclass" and any(kw.arg == "slots" for kw in node.keywords):
+                report.error(
+                    "PY39-COMPAT",
+                    f"{rel_path}:{node.lineno}: forbidden dataclass(..., slots=...) (Python 3.10+ only)",
+                )
+
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "write_text":
+                if any(kw.arg == "newline" for kw in node.keywords):
+                    report.error(
+                        "PY39-COMPAT",
+                        f"{rel_path}:{node.lineno}: forbidden Path.write_text(..., newline=...) (Python 3.10+ only)",
+                    )
+
+            if func_name == "zip" and any(kw.arg == "strict" for kw in node.keywords):
+                report.error(
+                    "PY39-COMPAT",
+                    f"{rel_path}:{node.lineno}: forbidden zip(..., strict=...) (Python 3.10+ only)",
+                )
+
+            if func_name in ("isinstance", "issubclass") and len(node.args) >= 2:
+                if any(
+                    isinstance(sub, ast.BinOp) and isinstance(sub.op, ast.BitOr)
+                    for sub in ast.walk(node.args[1])
+                ):
+                    report.error(
+                        "PY39-COMPAT",
+                        f"{rel_path}:{node.lineno}: forbidden {func_name}(..., A | B) runtime union (use (A, B) tuple)",
+                    )
+
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr == "UTC"
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "datetime"
+        ):
+            report.error(
+                "PY39-COMPAT",
+                f"{rel_path}:{node.lineno}: forbidden datetime.UTC (Python 3.11+ only; use timezone.utc)",
+            )
+
+
 def validate_line_endings_and_utf8(root: Path, report: ValidationReport) -> None:
     for path in iter_repo_files(root):
         if not is_text_candidate(path):
@@ -229,7 +439,7 @@ def validate_line_endings_and_utf8(root: Path, report: ValidationReport) -> None
             report.error("UTF8", f"{rel(path, root)} is not valid UTF-8: {exc}")
             continue
 
-        # In-memory Python syntax verification (never writes .pyc files)
+        # In-memory Python syntax & Python 3.9 compatibility verification (never writes .pyc files)
         is_python = path.suffix == ".py" or text.startswith("#!/usr/bin/env python") or text.startswith("#!/usr/bin/python")
         if is_python:
             report.bump("python_ast")
@@ -237,6 +447,8 @@ def validate_line_endings_and_utf8(root: Path, report: ValidationReport) -> None
                 ast.parse(text, filename=rel(path, root))
             except SyntaxError as exc:
                 report.error("PYTHON-SYNTAX", f"{rel(path, root)}:{exc.lineno}: {exc.msg}")
+                continue
+            _validate_python_39_compat(path, text, root, report)
 
 
 # ---------------------------------------------------------------------------

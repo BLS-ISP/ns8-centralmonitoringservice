@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Regenerate instance secrets, avoid Traefik FQDN collision, and start cloned Hub pod."""
 
+from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path
@@ -41,7 +43,10 @@ def main() -> int:
     requested_host = str(request.get("host", "")).strip().lower() if isinstance(request, dict) else ""
     candidate_host = requested_host or env.get("TRAEFIK_HOST", "").strip().lower()
 
-    if candidate_host and agent.http_route_in_use(domain=candidate_host):
+    route_check = getattr(agent, "http_route_in_use", None)
+    is_colliding = bool(route_check(domain=candidate_host)) if (candidate_host and callable(route_check)) else False
+
+    if candidate_host and is_colliding:
         # Clear colliding route so cloned instance never hijacks source production FQDN
         agent.set_env("TRAEFIK_HOST", "")
         agent.set_env("CONFIGURED", "false")
@@ -64,6 +69,13 @@ def main() -> int:
         pass
 
     try:
+        from hub_alerting.alertmanager_config import render_all_probe_configs
+
+        render_all_probe_configs(state_dir)
+    except (ImportError, AttributeError):
+        pass
+
+    try:
         from hub_alerting.alertmanager_config import sync_alertmanager
 
         sync_alertmanager(state_dir)
@@ -71,13 +83,14 @@ def main() -> int:
         pass
 
     if candidate_host:
+        tcp_port = env.get("TCP_PORT", "20080")
         traefik_id = agent.resolve_agent_id("traefik@node")
         agent.tasks.run(
             agent_id=traefik_id,
             action="set-route",
             data={
                 "instance": env.get("MODULE_ID", "central-monitoring-hub1"),
-                "url": f"http://127.0.0.1:{env.get('TCP_PORT', '20080')}",
+                "url": f"http://127.0.0.1:{tcp_port}",
                 "host": candidate_host,
                 "lets_encrypt": env.get("TRAEFIK_LETS_ENCRYPT", "true").lower() == "true",
                 "http2https": env.get("TRAEFIK_HTTP2HTTPS", "true").lower() == "true",

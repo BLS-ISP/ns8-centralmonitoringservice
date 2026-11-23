@@ -13,6 +13,7 @@ RestartSec=5
 TimeoutStartSec=90
 TimeoutStopSec=30
 ExecStartPre=/bin/rm -f %t/pve-exporter.pid %t/pve-exporter.ctr-id
+ExecStartPre=/bin/mkdir -p %E/state/pve-conf
 ExecStart=/usr/bin/podman run \
     --detach \
     --conmon-pidfile=%t/pve-exporter.pid \
@@ -24,7 +25,7 @@ ExecStart=/usr/bin/podman run \
     --restart=on-failure \
     --user 0:0 \
     --name=pve-exporter \
-    -v %E/state/pve.yml:/etc/prometheus/pve.yml:ro,Z \
+    -v %E/state/pve-conf:/etc/prometheus:ro,z \
     ${PROMETHEUS_PVE_EXPORTER_IMAGE} \
     --config.file=/etc/prometheus/pve.yml \
     --web.listen-address=127.0.0.1:9221

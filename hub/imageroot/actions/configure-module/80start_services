@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Enable and restart core systemd units plus conditional Thanos units (s3 vs local)."""
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

@@ -22,7 +22,7 @@ LABEL org.opencontainers.image.title="Central Monitoring Collector" \
       org.nethserver.rootfull=0 \
       org.nethserver.min-core="3.0.0" \
       org.nethserver.flags="" \
-      org.nethserver.volumes="alloy-wal-data" \
+      org.nethserver.volumes="" \
       org.nethserver.images="docker.io/grafana/alloy:v1.4.2 docker.io/prompve/prometheus-pve-exporter:3.4.5"
 
 ENTRYPOINT [ "/" ]

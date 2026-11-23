@@ -352,10 +352,11 @@ def discover_smarthost(state_dir: str | Path | None = None) -> Path:
         "SMARTHOST_TLS_VERIFY": tls_verify,
         "TLS_VERIFY": tls_verify,
     }
-    lines = [
-        f"{k}={_format_env_value(''.join(c for c in v if c not in _FORBIDDEN_SECRET_CHARS))}"
-        for k, v in sorted(pairs.items())
-    ]
+    lines: list[str] = []
+    for k, v in sorted(pairs.items()):
+        sanitized = "".join(c for c in v if c not in _FORBIDDEN_SECRET_CHARS)
+        formatted = _format_env_value(sanitized)
+        lines.append(f"{k}={formatted}")
     target = sdir / "smarthost.env"
     atomic_write_text(target, "\n".join(lines), mode=0o600)
     return target

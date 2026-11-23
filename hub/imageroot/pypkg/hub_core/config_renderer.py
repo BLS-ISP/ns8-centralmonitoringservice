@@ -312,6 +312,7 @@ def _ensure_bootstrap_auxiliary_configs(config_dir: Path, shared_dir: Path) -> N
         atomic_write_text(ldap_toml, "# Managed by central-monitoring-hub ldap_sync\n", mode=0o600)
 
     am_cfg = config_dir / "alertmanager" / "alertmanager.yml"
+    (config_dir / "alertmanager" / "templates").mkdir(parents=True, exist_ok=True)
     if not am_cfg.exists():
         atomic_write_text(
             am_cfg,
@@ -332,23 +333,77 @@ def _ensure_bootstrap_auxiliary_configs(config_dir: Path, shared_dir: Path) -> N
 
     bb_cfg = config_dir / "blackbox" / "blackbox.yml"
     if not bb_cfg.exists():
-        atomic_write_text(
-            bb_cfg,
-            "\n".join(
-                [
-                    "modules:",
-                    "  http_2xx:",
-                    "    prober: http",
-                    "    timeout: 10s",
-                    "    http:",
-                    '      preferred_ip_protocol: "ip4"',
-                    "  tcp_connect:",
-                    "    prober: tcp",
-                    "    timeout: 5s",
-                ]
-            ),
-            mode=0o644,
-        )
+        try:
+            from hub_alerting.blackbox_config import render_blackbox_yaml
+
+            atomic_write_text(bb_cfg, render_blackbox_yaml(), mode=0o644)
+        except ImportError:
+            atomic_write_text(
+                bb_cfg,
+                "\n".join(
+                    [
+                        "modules:",
+                        "  http_2xx:",
+                        "    prober: http",
+                        "    timeout: 10s",
+                        "    http:",
+                        '      preferred_ip_protocol: "ip4"',
+                        "      ip_protocol_fallback: true",
+                        "      follow_redirects: false",
+                        "  http_2xx_insecure:",
+                        "    prober: http",
+                        "    timeout: 10s",
+                        "    http:",
+                        '      preferred_ip_protocol: "ip4"',
+                        "      ip_protocol_fallback: true",
+                        "      follow_redirects: false",
+                        "      tls_config:",
+                        "        insecure_skip_verify: true",
+                        "  http_post_2xx:",
+                        "    prober: http",
+                        "    timeout: 10s",
+                        "    http:",
+                        "      method: POST",
+                        '      preferred_ip_protocol: "ip4"',
+                        "      ip_protocol_fallback: true",
+                        "      follow_redirects: false",
+                        "  http_post_2xx_insecure:",
+                        "    prober: http",
+                        "    timeout: 10s",
+                        "    http:",
+                        "      method: POST",
+                        '      preferred_ip_protocol: "ip4"',
+                        "      ip_protocol_fallback: true",
+                        "      follow_redirects: false",
+                        "      tls_config:",
+                        "        insecure_skip_verify: true",
+                        "  tcp_connect:",
+                        "    prober: tcp",
+                        "    timeout: 5s",
+                        "  dns_tcp:",
+                        "    prober: dns",
+                        "    timeout: 5s",
+                        "    dns:",
+                        '      transport_protocol: "tcp"',
+                        '      query_name: "nethserver.org"',
+                        '      query_type: "A"',
+                        "  dns_udp:",
+                        "    prober: dns",
+                        "    timeout: 5s",
+                        "    dns:",
+                        '      transport_protocol: "udp"',
+                        '      query_name: "nethserver.org"',
+                        '      query_type: "A"',
+                        "  icmp:",
+                        "    prober: icmp",
+                        "    timeout: 5s",
+                        "    icmp:",
+                        '      preferred_ip_protocol: "ip4"',
+                        "      ip_protocol_fallback: true",
+                    ]
+                ),
+                mode=0o644,
+            )
 
     snmp_cfg = config_dir / "snmp" / "snmp.yml"
     if not snmp_cfg.exists():

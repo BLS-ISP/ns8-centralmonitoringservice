@@ -34,7 +34,8 @@ def _systemctl(*args: str) -> None:
 
 def main() -> int:
     state_dir = get_state_dir()
-    env = agent.read_envfile(state_dir / "environment")
+    env_path = state_dir / "environment"
+    env = agent.read_envfile(str(env_path)) if env_path.is_file() else {}
     env.update({k: v for k, v in os.environ.items() if k in env})
 
     configured = env.get("CONFIGURED", "0") == "1"

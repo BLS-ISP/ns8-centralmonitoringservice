@@ -47,7 +47,7 @@ HTTP_SESSION_KEY: web.AppKey[aiohttp.ClientSession] = web.AppKey(
 )
 
 
-@dataclass(slots=True)
+@dataclass
 class GatewaySettings:
     tenants_file: Path
     prom_write_url: str = "http://127.0.0.1:9090/api/v1/write"

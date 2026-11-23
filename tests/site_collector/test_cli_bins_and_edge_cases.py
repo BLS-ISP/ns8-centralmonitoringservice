@@ -20,21 +20,21 @@ def test_bin_collect_ns8_metrics_render_alloy_and_backup_hooks_cli(tmp_path: Pat
 
     # Seed backup JSON fixture so bin/collect-ns8-metrics emits backup metrics end-to-end
     backups_json = state_dir / "ns8-backups.json"
-    backups_json.write_text(
-        json.dumps(
-            {
-                "backups": [
-                    {
-                        "module_id": "samba1",
-                        "succeeded": True,
-                        "last_success_timestamp": 1732050000,
-                    }
-                ]
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-        newline="\n",
+    backups_json.write_bytes(
+        (
+            json.dumps(
+                {
+                    "backups": [
+                        {
+                            "module_id": "samba1",
+                            "succeeded": True,
+                            "last_success_timestamp": 1732050000,
+                        }
+                    ]
+                }
+            )
+            + "\n"
+        ).encode("utf-8")
     )
 
     env = dict(os.environ)
@@ -57,7 +57,7 @@ def test_bin_collect_ns8_metrics_render_alloy_and_backup_hooks_cli(tmp_path: Pat
 
     # 2. bin/module-dump-state and bin/module-cleanup-state
     stale_tmp = state_dir / ".local-targets.json.tmp.99999.deadbeef"
-    stale_tmp.write_text("stale\n", encoding="utf-8", newline="\n")
+    stale_tmp.write_bytes(b"stale\n")
 
     res_dump = subprocess.run(
         [sys.executable, str(IMAGEROOT / "bin" / "module-dump-state")],
@@ -83,29 +83,27 @@ def test_bin_collect_ns8_metrics_render_alloy_and_backup_hooks_cli(tmp_path: Pat
     assert not stale_tmp.exists()
 
     # 3. bin/render-alloy-config
-    (state_dir / "environment").write_text(
-        "\n".join(
-            [
-                "CONFIGURED=1",
-                "HUB_URL=https://monitoring.msp.example.com",
-                "CUSTOMER=acme-corp",
-                "SITE=dc1",
-                "COLLECTOR_ID=acme-corp-dc1-ns8",
-                "COLLECT_LOCAL_NS8=1",
-                "ENABLE_SYSLOG_RECEIVER=0",
-                "SYSLOG_PORT=5514",
-                "WAL_MAX_DISK_MB=2048",
-                "TLS_SKIP_VERIFY=0",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-        newline="\n",
+    (state_dir / "environment").write_bytes(
+        (
+            "\n".join(
+                [
+                    "CONFIGURED=1",
+                    "HUB_URL=https://monitoring.msp.example.com",
+                    "CUSTOMER=acme-corp",
+                    "SITE=dc1",
+                    "COLLECTOR_ID=acme-corp-dc1-ns8",
+                    "COLLECT_LOCAL_NS8=1",
+                    "ENABLE_SYSLOG_RECEIVER=0",
+                    "SYSLOG_PORT=5514",
+                    "WAL_MAX_DISK_MB=2048",
+                    "TLS_SKIP_VERIFY=0",
+                ]
+            )
+            + "\n"
+        ).encode("utf-8")
     )
-    (state_dir / "secrets.env").write_text(
-        "HUB_AUTH_TOKEN=cms_v1_CliRenderToken12345678901234567890\n",
-        encoding="utf-8",
-        newline="\n",
+    (state_dir / "secrets.env").write_bytes(
+        b"HUB_AUTH_TOKEN=cms_v1_CliRenderToken12345678901234567890\n"
     )
     res_render = subprocess.run(
         [sys.executable, str(IMAGEROOT / "bin" / "render-alloy-config")],

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Read Hub configuration (secrets redacted), LDAP domains, and component health."""
 
+from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path

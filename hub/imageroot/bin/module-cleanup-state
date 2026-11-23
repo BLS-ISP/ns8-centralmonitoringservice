@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Remove temporary backup snapshots after Restic completes."""
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

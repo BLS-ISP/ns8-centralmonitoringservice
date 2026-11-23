@@ -197,7 +197,8 @@ def _render_federation_jobs(
             selectors = list(target.get("match_selectors") or DEFAULT_MATCH_SELECTORS)
             endpoints = [_normalize_host_port_endpoint(ep) for ep in target.get("endpoints", [])]
 
-            lines.append(f"  - job_name: {yaml_quote(f'ns8-federation-{tid}')}")
+            job_name = f"ns8-federation-{tid}"
+            lines.append(f"  - job_name: {yaml_quote(job_name)}")
             lines.append("    honor_labels: false")
             lines.append(f"    scrape_interval: {interval}")
             lines.append(f"    scheme: {scheme}")
@@ -274,7 +275,7 @@ def sync_target_configs(
         folder.mkdir(parents=True, exist_ok=True)
 
     bb_path = cdir / "blackbox" / "blackbox.yml"
-    if not bb_path.is_file():
+    if not bb_path.is_file() or "http_post_2xx:" not in bb_path.read_text(encoding="utf-8"):
         render_blackbox_config(bb_path, state_dir=state_dir)
 
     expected_sd_files: dict[str, set[str]] = {"exporter": set(), "blackbox": set(), "snmp": set()}

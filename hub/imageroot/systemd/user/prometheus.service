@@ -22,9 +22,9 @@ ExecStart=/usr/bin/podman run \
     --restart=on-failure \
     --sdnotify=conmon \
     --user 0:0 \
-    --volume=%E/config/prometheus:/etc/prometheus:Z \
-    --volume=%E/config/custom-rules:/etc/prometheus/custom-rules:Z \
-    --volume=prometheus-data:/prometheus:Z \
+    --volume=%E/config/prometheus:/etc/prometheus:z \
+    --volume=%E/config/custom-rules:/etc/prometheus/custom-rules:z \
+    --volume=prometheus-data:/prometheus:z \
     ${PROMETHEUS_IMAGE} \
     --config.file=/etc/prometheus/prometheus.yml \
     --storage.tsdb.path=/prometheus \

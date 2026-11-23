@@ -34,14 +34,14 @@ class LokiDecodeError(ValueError):
     """Raised when a Loki JSON or Protobuf PushRequest payload is malformed."""
 
 
-@dataclass(slots=True)
+@dataclass
 class LokiEntry:
     timestamp_seconds: int
     timestamp_nanos: int
     line: str
 
 
-@dataclass(slots=True)
+@dataclass
 class LokiStream:
     labels: str
     entries: list[LokiEntry] = field(default_factory=list)

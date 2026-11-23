@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 from aiohttp.test_utils import TestClient, TestServer

@@ -29,9 +29,9 @@ fi
 
 "${CONTAINER_ENGINE}" run --rm \
     --network=host \
-    --volume "${SSH_KEYFILE}:/id_rsa:ro,Z" \
-    --volume "${SCRIPT_DIR}/tests:/home/pwuser/ns8-module/tests:ro,Z" \
-    --volume "${OUTPUT_DIR}:/home/pwuser/outputs:Z" \
+    --volume "${SSH_KEYFILE}:/id_rsa:ro,z" \
+    --volume "${SCRIPT_DIR}/tests:/home/pwuser/ns8-module/tests:ro,z" \
+    --volume "${OUTPUT_DIR}:/home/pwuser/outputs:z" \
     ghcr.io/nethserver/robotframework:latest \
     robot \
         -v "NODE_ADDR:${LEADER_NODE}" \

@@ -22,8 +22,8 @@ ExecStart=/usr/bin/podman run \
     --restart=on-failure \
     --sdnotify=conmon \
     --user 0:0 \
-    --volume=%E/config/loki/loki.yaml:/etc/loki/loki.yaml:Z \
-    --volume=loki-data:/var/lib/loki:Z \
+    --volume=%E/config/loki:/etc/loki:ro,z \
+    --volume=loki-data:/var/lib/loki:z \
     ${LOKI_IMAGE} \
     -config.file=/etc/loki/loki.yaml
 ExecStop=/usr/bin/podman stop --ignore --cidfile %t/%N.cid -t 15

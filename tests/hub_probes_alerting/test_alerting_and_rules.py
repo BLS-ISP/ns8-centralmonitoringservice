@@ -165,8 +165,8 @@ def test_configure_alerting_multichannel_customer_routes_secret_preservation_and
     # Test cross-module sync_alertmanager(state_dir) when beta-gmbh adds contact_emails
     tenants_data = json.loads((state_dir / "tenants.json").read_text(encoding="utf-8"))
     tenants_data["tenants"][1]["contact_emails"] = ["it@beta.example.com"]
-    (state_dir / "tenants.json").write_text(
-        json.dumps(tenants_data, indent=2) + "\n", encoding="utf-8", newline="\n"
+    (state_dir / "tenants.json").write_bytes(
+        (json.dumps(tenants_data, indent=2) + "\n").encode("utf-8")
     )
     assert sync_alertmanager(state_dir) is True
     am_yml_synced = (config_dir / "alertmanager" / "alertmanager.yml").read_text(encoding="utf-8")

@@ -108,7 +108,7 @@ def _is_ssrf_connector_error(exc: BaseException) -> bool:
     return isinstance(cause, PushSSRFBlockedError)
 
 
-@dataclass(slots=True)
+@dataclass
 class AlertRelaySettings:
     state_dir: Path
     secrets_file: Path | None = None

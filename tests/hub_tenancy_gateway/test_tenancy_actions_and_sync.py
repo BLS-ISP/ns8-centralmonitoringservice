@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import ast
 import json
 import os
 import re
@@ -73,14 +76,14 @@ class TestTenancyActionsAndSchemas:
         am_pkg = fake_pypkg / "hub_alerting"
         am_pkg.mkdir(parents=True)
         hook_marker = tmp_path / "am_synced.txt"
-        (am_pkg / "__init__.py").write_text("", encoding="utf-8", newline="\n")
-        (am_pkg / "alertmanager_config.py").write_text(
-            f"from pathlib import Path\n"
-            f"def sync_alertmanager(state_dir):\n"
-            f"    Path({str(hook_marker)!r}).write_text(str(state_dir), encoding='utf-8')\n",
-            encoding="utf-8",
-            newline="\n",
+        (am_pkg / "__init__.py").write_bytes(b"")
+        hook_path_repr = repr(str(hook_marker))
+        am_stub = (
+            "from pathlib import Path\n"
+            "def sync_alertmanager(state_dir):\n"
+            f"    Path({hook_path_repr}).write_bytes(str(state_dir).encode('utf-8'))\n"
         )
+        (am_pkg / "alertmanager_config.py").write_bytes(am_stub.encode("utf-8"))
         extra_env = {"PYTHONPATH": str(fake_pypkg)}
 
         # 1. Create tenant
@@ -591,3 +594,76 @@ class TestStaticHygieneAndLFCompliance:
         containerfile = (REPO_ROOT / "hub" / "gateway" / "Containerfile").read_text(encoding="utf-8")
         assert "python:3.12-slim" in containerfile
         assert "USER " in containerfile
+
+    def test_strict_python39_compatibility_across_all_owned_files(self):
+        python_roots = [
+            REPO_ROOT / "hub" / "gateway" / "hub_gateway",
+            REPO_ROOT / "hub" / "imageroot" / "pypkg" / "hub_tenancy",
+            *(ACTIONS_DIR / a for a in TENANCY_ACTIONS),
+            REPO_ROOT / "tests" / "hub_tenancy_gateway",
+        ]
+        py_files = [
+            p
+            for root in python_roots
+            for p in sorted(root.rglob("*"))
+            if p.is_file() and "__pycache__" not in p.parts and not p.name.endswith(".json")
+        ]
+        assert len(py_files) >= 24
+
+        for p in py_files:
+            src = p.read_text(encoding="utf-8")
+            tree = ast.parse(src, filename=str(p), feature_version=(3, 9))
+
+            has_future = any(
+                isinstance(n, ast.ImportFrom)
+                and n.module == "__future__"
+                and any(a.name == "annotations" for a in n.names)
+                for n in tree.body
+            )
+            assert has_future, f"Missing 'from __future__ import annotations' in {p}"
+
+            for node in ast.walk(tree):
+                assert not isinstance(node, ast.Match), f"Python 3.10+ match/case in {p}:{node.lineno}"
+                if isinstance(node, ast.Call):
+                    if isinstance(node.func, ast.Attribute) and node.func.attr == "write_text":
+                        for kw in node.keywords:
+                            assert kw.arg != "newline", (
+                                f"Python 3.10+ Path.write_text(newline=...) in {p}:{node.lineno}"
+                            )
+                    for kw in node.keywords:
+                        assert kw.arg not in (
+                            "slots",
+                            "kw_only",
+                            "match_args",
+                            "strict",
+                        ), f"Python 3.10+ keyword '{kw.arg}=' in {p}:{node.lineno}"
+                    if (
+                        isinstance(node.func, ast.Name)
+                        and node.func.id in ("isinstance", "issubclass")
+                        and len(node.args) >= 2
+                        and isinstance(node.args[1], ast.BinOp)
+                        and isinstance(node.args[1].op, ast.BitOr)
+                    ):
+                        raise AssertionError(f"Python 3.10+ isinstance union in {p}:{node.lineno}")
+                if isinstance(node, ast.Attribute):
+                    assert node.attr != "UTC", f"Python 3.11+ datetime.UTC in {p}:{node.lineno}"
+                    if node.attr == "walk" and not (
+                        isinstance(node.value, ast.Name) and node.value.id in ("ast", "os")
+                    ):
+                        raise AssertionError(f"Python 3.12+ Path.walk in {p}:{node.lineno}")
+                if isinstance(node, ast.JoinedStr):
+                    seg = ast.get_source_segment(src, node) or ""
+                    stripped = seg.lstrip("rRfF")
+                    is_triple = stripped.startswith('"""') or stripped.startswith("'''")
+                    outer_q = stripped[:3] if is_triple else stripped[:1]
+                    for val in node.values:
+                        if isinstance(val, ast.FormattedValue):
+                            vseg = ast.get_source_segment(src, val) or ""
+                            inner = vseg[1:-1] if vseg.startswith("{") and vseg.endswith("}") else vseg
+                            assert "\\" not in inner, f"PEP 701 backslash in f-string {p}:{node.lineno}"
+                            if not is_triple:
+                                assert "\n" not in inner, f"PEP 701 newline in f-string {p}:{node.lineno}"
+                            if outer_q:
+                                assert outer_q not in inner, (
+                                    f"PEP 701 nested same-quote in f-string {p}:{node.lineno}"
+                                )

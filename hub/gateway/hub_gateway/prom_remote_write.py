@@ -41,13 +41,13 @@ class LabelValidationError(ValueError):
     """Raised when canonical telemetry labels (site, device_role, collector_id) are invalid."""
 
 
-@dataclass(slots=True)
+@dataclass
 class Sample:
     value: float
     timestamp_ms: int
 
 
-@dataclass(slots=True)
+@dataclass
 class TimeSeries:
     labels: list[tuple[str, str]]
     samples: list[Sample] = field(default_factory=list)

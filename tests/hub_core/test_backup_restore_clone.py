@@ -191,18 +191,25 @@ def test_dump_state_podman_exec_avoids_world_readable_tmp_and_clone_syncs_orgs(
         )
     assert any("/var/lib/grafana/.grafana.db.bak" in part for cmd in recorded_cmds for part in cmd)
 
-    # Verify clone-module/50configure invokes sync_all_orgs_if_running after rotating GRAFANA_SECRET_KEY
+    # Verify clone-module/50configure invokes render_all_probe_configs and sync_all_orgs_if_running
     monkeypatch.setenv("GRAFANA_DB_PATH", str(ns8_env.install_dir / "volumes" / "grafana.db"))
     synced: list[str] = []
     tenancy_pkg = types.ModuleType("hub_tenancy")
     graf_mod = types.ModuleType("hub_tenancy.grafana_sync")
-    graf_mod.sync_all_orgs_if_running = lambda s, e=None: synced.append("synced")  # type: ignore[attr-defined]
+    alert_pkg = types.ModuleType("hub_alerting")
+    am_mod = types.ModuleType("hub_alerting.alertmanager_config")
+    graf_mod.sync_all_orgs_if_running = lambda s, e=None: synced.append("grafana_orgs")  # type: ignore[attr-defined]
+    am_mod.render_all_probe_configs = lambda s: synced.append("probe_configs")  # type: ignore[attr-defined]
+    am_mod.sync_alertmanager = lambda s: synced.append("alertmanager")  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "hub_tenancy", tenancy_pkg)
     monkeypatch.setitem(sys.modules, "hub_tenancy.grafana_sync", graf_mod)
+    monkeypatch.setitem(sys.modules, "hub_alerting", alert_pkg)
+    monkeypatch.setitem(sys.modules, "hub_alerting.alertmanager_config", am_mod)
 
     rc, _, stderr = execute_script(
         IMAGEROOT / "actions" / "clone-module" / "50configure",
         payload={"host": "cloned-hub.msp.example.com"},
     )
     assert rc == 0, stderr
-    assert synced, "clone-module/50configure must invoke sync_all_orgs_if_running after rotating GRAFANA_SECRET_KEY"
+    assert "probe_configs" in synced, "clone-module/50configure must invoke render_all_probe_configs"
+    assert "grafana_orgs" in synced, "clone-module/50configure must invoke sync_all_orgs_if_running"

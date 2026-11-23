@@ -14,7 +14,7 @@ RestartSec=5
 TimeoutStartSec=120
 TimeoutStopSec=70
 ExecStartPre=/bin/rm -f %t/%N.pid %t/%N.cid
-ExecStartPre=/usr/bin/podman run --rm --pull=missing --pod-id-file %t/central-monitoring-hub.pod-id --volume=%E/bin/wait-pod-endpoints:/wait-pod-endpoints:ro,Z --entrypoint=python3 ${CENTRAL_MONITORING_HUB_GATEWAY_IMAGE} /wait-pod-endpoints http://127.0.0.1:9090/-/ready
+ExecStartPre=/usr/bin/podman run --rm --pull=missing --pod-id-file %t/central-monitoring-hub.pod-id --volume=%E/bin:/hub-bin:ro,z --entrypoint=python3 ${CENTRAL_MONITORING_HUB_GATEWAY_IMAGE} /hub-bin/wait-pod-endpoints http://127.0.0.1:9090/-/ready
 ExecStart=/usr/bin/podman run \
     --conmon-pidfile %t/%N.pid \
     --cidfile %t/%N.cid \
@@ -25,8 +25,8 @@ ExecStart=/usr/bin/podman run \
     --restart=on-failure \
     --sdnotify=conmon \
     --user 0:0 \
-    --volume=%E/config/thanos/objstore.yml:/etc/thanos/objstore.yml:ro,Z \
-    --volume=prometheus-data:/prometheus:Z \
+    --volume=%E/config/thanos:/etc/thanos:ro,z \
+    --volume=prometheus-data:/prometheus:z \
     ${THANOS_IMAGE} \
     sidecar \
     --tsdb.path=/prometheus \

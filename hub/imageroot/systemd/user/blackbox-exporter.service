@@ -22,9 +22,9 @@ ExecStart=/usr/bin/podman run \
     --restart=on-failure \
     --sdnotify=conmon \
     --user 0:0 \
-    --volume=%E/config/blackbox/blackbox.yml:/etc/blackbox_exporter/config.yml:Z \
+    --volume=%E/config/blackbox:/etc/blackbox_exporter:ro,z \
     ${BLACKBOX_EXPORTER_IMAGE} \
-    --config.file=/etc/blackbox_exporter/config.yml \
+    --config.file=/etc/blackbox_exporter/blackbox.yml \
     --web.listen-address=127.0.0.1:9115
 ExecStop=/usr/bin/podman stop --ignore --cidfile %t/%N.cid -t 10
 ExecStopPost=/usr/bin/podman rm --ignore -f --cidfile %t/%N.cid

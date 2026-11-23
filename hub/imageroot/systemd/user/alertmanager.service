@@ -22,8 +22,8 @@ ExecStart=/usr/bin/podman run \
     --restart=on-failure \
     --sdnotify=conmon \
     --user 0:0 \
-    --volume=%E/config/alertmanager:/etc/alertmanager:Z \
-    --volume=alertmanager-data:/alertmanager:Z \
+    --volume=%E/config/alertmanager:/etc/alertmanager:ro,z \
+    --volume=alertmanager-data:/alertmanager:z \
     ${ALERTMANAGER_IMAGE} \
     --config.file=/etc/alertmanager/alertmanager.yml \
     --storage.path=/alertmanager \

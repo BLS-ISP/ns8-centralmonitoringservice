@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -21,6 +21,9 @@ from hub_alerting import (
 )
 
 _SILENCE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_-]{4,128}\Z")
+_RFC3339_RE: Final[re.Pattern[str]] = re.compile(
+    r"\A(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(?:([Zz])|([+-])(\d{2}):?(\d{2}))?\Z"
+)
 ALLOWED_SILENCE_ROLES: Final[frozenset[str]] = frozenset(
     {
         "",
@@ -43,15 +46,30 @@ def _alertmanager_base_url() -> str:
 
 
 def _parse_rfc3339(ts_str: str, field: str) -> datetime:
+    """Parse RFC3339 / ISO-8601 timestamps cleanly on Python 3.9+ (including Go RFC3339Nano fractional digits)."""
     cleaned = ts_str.strip()
-    if cleaned.endswith("Z"):
-        cleaned = cleaned[:-1] + "+00:00"
+    match = _RFC3339_RE.match(cleaned)
+    if not match:
+        raise ValidationFailure(field, ts_str, "invalid_timestamp", f"Invalid RFC3339 timestamp: {ts_str}")
+
+    year, month, day, hour, minute, second = (int(match.group(i)) for i in range(1, 7))
+    frac = match.group(7) or ""
+    microsecond = int((frac + "000000")[:6]) if frac else 0
+
+    if match.group(9):
+        sign = 1 if match.group(9) == "+" else -1
+        tz_hours = int(match.group(10))
+        tz_mins = int(match.group(11))
+        if tz_hours > 23 or tz_mins > 59:
+            raise ValidationFailure(field, ts_str, "invalid_timestamp", f"Invalid timezone offset in: {ts_str}")
+        tz_info = timezone(sign * timedelta(hours=tz_hours, minutes=tz_mins))
+    else:
+        tz_info = timezone.utc
+
     try:
-        parsed = datetime.fromisoformat(cleaned)
+        parsed = datetime(year, month, day, hour, minute, second, microsecond, tzinfo=tz_info)
     except ValueError as exc:
-        raise ValidationFailure(field, ts_str, "invalid_timestamp", f"Invalid RFC3339 timestamp: {ts_str}") from exc
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        raise ValidationFailure(field, ts_str, "invalid_timestamp", f"Invalid calendar date/time: {ts_str}") from exc
     return parsed.astimezone(timezone.utc)
 
 

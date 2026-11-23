@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Initialize NS8 module secrets, default environment, and bootstrap configs."""
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

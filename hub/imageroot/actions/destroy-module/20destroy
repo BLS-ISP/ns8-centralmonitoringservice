@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Remove Traefik route, stop systemd units, and delete Podman pod and volumes."""
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 
@@ -48,7 +50,7 @@ def main() -> int:
 
     agent.run_helper("podman", "pod", "rm", "--ignore", "-f", "central-monitoring-hub")
     for vol in MODULE_VOLUMES:
-        agent.run_helper("podman", "volume", "rm", "--ignore", "-f", vol)
+        agent.run_helper("podman", "volume", "rm", "-f", vol)
 
     return 0
 

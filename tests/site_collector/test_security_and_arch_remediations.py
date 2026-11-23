@@ -315,3 +315,201 @@ def test_arch19b_snmp_v3_non_secret_metadata_round_trips_in_list_local_targets(
     jsonschema.validate(
         {"targets": items}, load_schema("collector-list-local-targets-output.json")
     )
+
+
+def test_rocky9_python39_ast_tokenize_and_selinux_mount_safety() -> None:
+    """Ensure all collector and test Python files parse cleanly under Python 3.9 rules and use safe SELinux :z mounts."""
+    import ast
+    import io
+    import tokenize
+
+    tests_root = Path(__file__).resolve().parent
+    py_files: list[Path] = []
+    for scan_root in (COLLECTOR_ROOT, tests_root):
+        for p in sorted(scan_root.rglob("*")):
+            if not p.is_file() or "node_modules" in p.parts or "__pycache__" in p.parts or "dist" in p.parts:
+                continue
+            if p.suffix == ".py" or (p.suffix == "" and p.read_bytes().startswith(b"#!/usr/bin/env python")):
+                py_files.append(p)
+
+    assert len(py_files) >= 30
+    for path in py_files:
+        src = path.read_text(encoding="utf-8")
+        tree = ast.parse(src, filename=str(path), feature_version=(3, 9))
+        has_future_ann = any(
+            isinstance(n, ast.ImportFrom)
+            and n.module == "__future__"
+            and any(a.name == "annotations" for a in n.names)
+            for n in tree.body[:5]
+        )
+        assert has_future_ann, f"{path} missing 'from __future__ import annotations' for Python 3.9"
+
+        # Forbid Python 3.10+ runtime keyword args (dataclass slots/kw_only, zip strict, Path.write_text newline)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                fn_name = (
+                    node.func.id
+                    if isinstance(node.func, ast.Name)
+                    else (node.func.attr if isinstance(node.func, ast.Attribute) else "")
+                )
+                for kw in node.keywords:
+                    assert kw.arg not in ("slots", "kw_only", "match_args", "strict"), (
+                        f"{path}:{node.lineno} uses Python 3.10+ keyword '{kw.arg}=' in {fn_name}()"
+                    )
+                    if fn_name == "write_text":
+                        assert kw.arg != "newline", (
+                            f"{path}:{node.lineno} uses Python 3.10+ Path.write_text(..., newline=...)"
+                        )
+
+        # Forbid PEP 701 nested f-strings, backslashes inside {...}, or quote reuse inside {...}
+        fstack: list[dict[str, object]] = []
+        for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+            tname = tokenize.tok_name[tok.type]
+            if tname == "FSTRING_START":
+                assert not fstack, f"{path}:{tok.start[0]} uses nested f-string (Python 3.12+ only)"
+                fstack.append({"quote": tok.string.lstrip("fFrR"), "expr": 0})
+            elif tname == "FSTRING_END":
+                fstack.pop()
+            elif fstack:
+                top = fstack[-1]
+                if tok.string == "{":
+                    top["expr"] = int(top["expr"]) + 1
+                elif tok.string == "}":
+                    top["expr"] = max(0, int(top["expr"]) - 1)
+                elif int(top["expr"]) > 0:
+                    assert "\\" not in tok.string, (
+                        f"{path}:{tok.start[0]} uses backslash inside f-string expression"
+                    )
+                    q = str(top["quote"])
+                    if q in ('"', "'"):
+                        assert q not in tok.string, (
+                            f"{path}:{tok.start[0]} reuses outer f-string quote inside expression"
+                        )
+
+    # SELinux mount safety: module state mounts use lowercase :z / :ro,z; host /proc,/sys,/,/var/log/journal never relabeled
+    systemd_dir = IMAGEROOT / "systemd" / "user"
+    for svc in systemd_dir.glob("*.service"):
+        svc_text = svc.read_text(encoding="utf-8")
+        assert ":Z" not in svc_text and ",Z" not in svc_text, (
+            f"{svc.name} must use shared lowercase :z / :ro,z instead of exclusive :Z"
+        )
+        for sys_mount in ("/proc:/host/proc:ro", "/sys:/host/sys:ro", "/:/host/root:ro", "/var/log/journal:/var/log/journal:ro"):
+            if sys_mount.split(":")[0] + ":" in svc_text:
+                assert f"{sys_mount}," not in svc_text and f"{sys_mount}:z" not in svc_text
+
+
+def test_live_ns8_01_and_03_directory_mounts_volumes_label_and_envfile_guards(
+    tmp_path: Path,
+) -> None:
+    """Verify LIVE-NS8-01 directory bind mounts for live reload and LIVE-NS8-03 volumes/envfile guards."""
+    from collector_lib.alloy_renderer import CollectorConfig, render_collector_artifacts
+
+    # 1. LIVE-NS8-01: systemd units mount directories (never single files) so os.replace() updates live containers
+    alloy_svc = (IMAGEROOT / "systemd" / "user" / "alloy.service").read_text(encoding="utf-8")
+    assert "%E/state/alloy-conf" in alloy_svc
+    assert "-v %E/state/alloy-conf:/etc/alloy/conf:ro,z" in alloy_svc
+    assert "/etc/alloy/conf/config.alloy" in alloy_svc
+    assert "%E/state/config.alloy:" not in alloy_svc
+
+    pve_svc = (IMAGEROOT / "systemd" / "user" / "pve-exporter.service").read_text(encoding="utf-8")
+    assert "%E/state/pve-conf" in pve_svc
+    assert "-v %E/state/pve-conf:/etc/prometheus:ro,z" in pve_svc
+    assert "--config.file=/etc/prometheus/pve.yml" in pve_svc
+    assert "%E/state/pve.yml:" not in pve_svc
+
+    # Verify render_collector_artifacts keeps alloy-conf/config.alloy & pve-conf/pve.yml in sync across updates
+    state_dir = tmp_path / "state"
+    cfg = CollectorConfig(
+        configured=True,
+        hub_url="https://monitoring.msp.example.com",
+        auth_token="cms_v1_LiveMountSyncToken1234567890123456789",
+        customer="acme-corp",
+        site="dc1",
+        collector_id="acme-corp-dc1-ns8",
+    )
+    render_collector_artifacts(state_dir, cfg, [])
+    assert (state_dir / "alloy-conf" / "config.alloy").read_text(encoding="utf-8") == (
+        state_dir / "config.alloy"
+    ).read_text(encoding="utf-8")
+    assert (state_dir / "pve-conf" / "pve.yml").read_text(encoding="utf-8") == (
+        state_dir / "pve.yml"
+    ).read_text(encoding="utf-8")
+
+    updated_targets = [
+        {
+            "id": "pve-01",
+            "name": "PVE Node 01",
+            "enabled": True,
+            "target_type": "proxmox",
+            "device_role": "proxmox",
+            "host": "192.168.10.20",
+            "port": 8006,
+            "scrape_interval": "60s",
+            "pve_token_id": "mon@pve!alloy",
+            "pve_token_secret": "secret-pve-tok",
+            "tls_skip_verify": True,
+        }
+    ]
+    render_collector_artifacts(state_dir, cfg, updated_targets)
+    alloy_mounted = (state_dir / "alloy-conf" / "config.alloy").read_text(encoding="utf-8")
+    pve_mounted = (state_dir / "pve-conf" / "pve.yml").read_text(encoding="utf-8")
+    assert "192.168.10.20" in alloy_mounted
+    assert alloy_mounted == (state_dir / "config.alloy").read_text(encoding="utf-8")
+    assert "secret-pve-tok" in pve_mounted
+    assert pve_mounted == (state_dir / "pve.yml").read_text(encoding="utf-8")
+
+    # 2. LIVE-NS8-03: Containerfile drops unused alloy-wal-data volume
+    cf_text = (COLLECTOR_ROOT / "Containerfile").read_text(encoding="utf-8")
+    assert "alloy-wal-data" not in cf_text
+    assert 'org.nethserver.volumes=""' in cf_text
+
+    # 3. LIVE-NS8-03: restore-module & clone-module guard missing state/environment safely
+    empty_state = tmp_path / "empty_state"
+    empty_state.mkdir(parents=True, exist_ok=True)
+    strict_agent = tmp_path / "strict_agent"
+    strict_agent.mkdir(parents=True, exist_ok=True)
+    (strict_agent / "agent.py").write_bytes(
+        (
+            "from __future__ import annotations\n"
+            "import os\n"
+            "from pathlib import Path\n"
+            "_MEM = {}\n"
+            "def read_envfile(path: str) -> dict[str, str]:\n"
+            "    assert isinstance(path, str), f'Expected str path, got {type(path)}'\n"
+            "    p = Path(path)\n"
+            "    if not p.is_file():\n"
+            "        raise FileNotFoundError(path)\n"
+            "    out = {}\n"
+            "    for ln in p.read_text(encoding='utf-8').splitlines():\n"
+            "        if '=' in ln and not ln.startswith('#'):\n"
+            "            k, v = ln.split('=', 1)\n"
+            "            out[k.strip()] = v.strip()\n"
+            "    return out\n"
+            "def set_env(key: str, val: str) -> None:\n"
+            "    _MEM[str(key)] = str(val)\n"
+            "def dump_env() -> None:\n"
+            "    p = Path(os.environ['COLLECTOR_STATE_DIR']) / 'environment'\n"
+            "    existing = read_envfile(str(p)) if p.is_file() else {}\n"
+            "    existing.update(_MEM)\n"
+            "    p.write_bytes(('\\n'.join(f'{k}={v}' for k, v in sorted(existing.items())) + '\\n').encode('utf-8'))\n"
+            "def run_helper(*args: str) -> None:\n"
+            "    return None\n"
+        ).encode("utf-8")
+    )
+
+    for rel_script in (
+        "actions/restore-module/06copyenv",
+        "actions/restore-module/50configure",
+        "actions/clone-module/50configure",
+    ):
+        # Delete environment before each call so missing-file guard is exercised directly
+        env_f = empty_state / "environment"
+        if env_f.exists():
+            env_f.unlink()
+        res = _run_action_script(
+            rel_script,
+            state_dir=empty_state,
+            agent_dir=strict_agent,
+            stdin_payload={} if "06copyenv" in rel_script else None,
+        )
+        assert res.returncode == 0, f"{rel_script} failed on missing state/environment: {res.stderr}"

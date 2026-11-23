@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
 """NS8 Rule #4: Validate Traefik hostname collisions before mutating module state."""
 
+from __future__ import annotations
+
 import json
 import os
 import sys
+
+
+def _is_route_in_use(agent_mod: object, domain: str) -> bool:
+    check_fn = getattr(agent_mod, "http_route_in_use", None)
+    if callable(check_fn):
+        return bool(check_fn(domain=domain))
+    return False
 
 
 def main() -> int:
@@ -13,7 +22,8 @@ def main() -> int:
     new_host = str(request.get("host", "")).strip().lower()
     current_host = os.environ.get("TRAEFIK_HOST", "").strip().lower()
 
-    if new_host and new_host != current_host and agent.http_route_in_use(domain=new_host):
+    # Check agent.http_route_in_use when defined on this NS8 core version
+    if new_host and new_host != current_host and _is_route_in_use(agent, new_host):
         agent.set_status("validation-failed")
         json.dump(
             [

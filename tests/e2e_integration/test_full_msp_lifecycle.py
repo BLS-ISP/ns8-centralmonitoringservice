@@ -7,6 +7,7 @@ and live async HTTP/HTTPS wire protocols across `hub-core`, `hub-tenancy-gateway
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import datetime
 import json
@@ -554,26 +555,26 @@ async def test_03_live_collector_to_live_hub_gateway_wire_integration(
     assert col_get_cfg["health"]["local_targets_count"] == 3
 
     # Seed NS8 backup records and execute real bin/collect-ns8-metrics -> ns8.prom
-    (collector.state_dir / "ns8-backups.json").write_text(
-        json.dumps(
-            {
-                "backups": [
-                    {
-                        "module_id": "mail1",
-                        "succeeded": True,
-                        "last_success_timestamp": 1763670000,
-                    },
-                    {
-                        "module_id": "nextcloud1",
-                        "succeeded": False,
-                        "last_success_timestamp": 1763580000,
-                    },
-                ]
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-        newline="\n",
+    (collector.state_dir / "ns8-backups.json").write_bytes(
+        (
+            json.dumps(
+                {
+                    "backups": [
+                        {
+                            "module_id": "mail1",
+                            "succeeded": True,
+                            "last_success_timestamp": 1763670000,
+                        },
+                        {
+                            "module_id": "nextcloud1",
+                            "succeeded": False,
+                            "last_success_timestamp": 1763580000,
+                        },
+                    ]
+                }
+            )
+            + "\n"
+        ).encode("utf-8")
     )
     await collector.run_script("bin/collect-ns8-metrics", validate_io=False)
     ns8_prom_file = collector.state_dir / "textfile" / "ns8.prom"
@@ -2075,6 +2076,178 @@ async def test_09_phase2_cluster_ns8_harvesting_qnap_printer_and_repomd(
 
     hub_images = by_id["central-monitoring-hub"]["versions"][0]["labels"]["org.nethserver.images"]
     assert "ghcr.io/msp-hosting/central-monitoring-hub-gateway:1.0.0" in hub_images
+
+
+@pytest.mark.asyncio
+async def test_10_live_ns8_probe_restore_clone_and_py39_compat(
+    tmp_path: Path, live_backends: LiveObservabilityBackends
+) -> None:
+    """Verify LIVE-NS8-02 full 8-module blackbox & target/rule restore/clone + LIVE-NS8-04 Py3.9."""
+    # 1. LIVE-NS8-04: Verify all tests/e2e_integration/*.py + fake-agent shims parse under Python 3.9
+    import tests.e2e_integration.harness as e2e_harness
+
+    def _assert_no_py310_stdlib_kwargs(tree: ast.AST, label: str) -> None:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Attribute) and node.func.attr == "write_text":
+                    assert not any(kw.arg == "newline" for kw in node.keywords), (
+                        f"Python 3.10+ write_text(newline=...) in {label}"
+                    )
+                if isinstance(node.func, ast.Name) and node.func.id == "dataclass":
+                    assert not any(kw.arg == "slots" for kw in node.keywords), (
+                        f"Python 3.10+ dataclass(slots=...) in {label}"
+                    )
+
+    e2e_dir = Path(__file__).resolve().parent
+    py_files = sorted(e2e_dir.glob("*.py"))
+    assert len(py_files) >= 4
+    for py_file in py_files:
+        raw = py_file.read_bytes()
+        assert b"\r\n" not in raw and not raw.startswith(b"\xef\xbb\xbf")
+        src = raw.decode("utf-8")
+        assert "from __future__ import annotations" in src, f"Missing future import in {py_file.name}"
+        parsed_tree = ast.parse(src, filename=str(py_file), feature_version=(3, 9))
+        _assert_no_py310_stdlib_kwargs(parsed_tree, py_file.name)
+
+    for shim_name, shim_src in (
+        ("agent/__init__.py", e2e_harness._FAKE_AGENT_INIT_PY),
+        ("agent/tasks.py", e2e_harness._FAKE_AGENT_TASKS_PY),
+        ("agent/ldapproxy.py", e2e_harness._FAKE_AGENT_LDAPPROXY_PY),
+    ):
+        shim_tree = ast.parse(shim_src, filename=shim_name, feature_version=(3, 9))
+        _assert_no_py310_stdlib_kwargs(shim_tree, shim_name)
+
+    # 2. LIVE-NS8-02: Verify configure-module upgrades bootstrap blackbox.yml to all 8 modules
+    #    and restore-module + clone-module re-render blackbox.yml, file_sd, snmp.yml, and rules!
+    hub = NS8ModuleInstance(
+        kind="hub",
+        install_dir=tmp_path / "hub_live_ns8_src",
+        module_id="central-monitoring-hub1",
+        backends=live_backends,
+    )
+    await hub.run_script("actions/create-module/20initialize")
+    await hub.run_script(
+        "actions/configure-module/20configure",
+        {
+            "host": "monitoring.msp.example.com",
+            "lets_encrypt": True,
+            "http2https": True,
+            "storage_mode": "local",
+        },
+    )
+
+    expected_bb_modules = (
+        "http_2xx:",
+        "http_2xx_insecure:",
+        "http_post_2xx:",
+        "http_post_2xx_insecure:",
+        "tcp_connect:",
+        "dns_tcp:",
+        "dns_udp:",
+        "icmp:",
+    )
+    bb_cfg_txt = (hub.config_dir / "blackbox" / "blackbox.yml").read_text(encoding="utf-8")
+    for mod_token in expected_bb_modules:
+        assert mod_token in bb_cfg_txt, f"Missing {mod_token} in rendered blackbox.yml"
+
+    await hub.run_script(
+        "actions/save-tenant/20save",
+        {
+            "customer": "acme-gmbh",
+            "display_name": "Acme GmbH",
+            "sites": ["hq"],
+            "contact_emails": ["it@acme.de"],
+            "customer_portal_enabled": False,
+        },
+    )
+    await hub.run_script(
+        "actions/save-target/20save",
+        {
+            "name": "Acme Webhook Health",
+            "enabled": True,
+            "target_type": "blackbox",
+            "customer": "acme-gmbh",
+            "site": "hq",
+            "device_role": "web",
+            "endpoints": ["https://api.acme.de/health"],
+            "blackbox_module": "http_post_2xx",
+            "tls_skip_verify": True,
+        },
+    )
+    await hub.run_script(
+        "actions/save-target/20save",
+        {
+            "name": "Acme Core UPS",
+            "enabled": True,
+            "target_type": "snmp",
+            "customer": "acme-gmbh",
+            "site": "hq",
+            "device_role": "snmp-ups",
+            "endpoints": ["203.0.113.44"],
+            "snmp_module": "apcupsd",
+            "snmp_version": "v2c",
+            "snmp_community": "ups-restore-ro",
+        },
+    )
+
+    custom_packs_payload = _default_alerting_payload(customer_email_enabled=True)
+    custom_packs_payload["enabled_rule_packs"] = ["ns8-cluster", "proxmox-ve"]
+    await hub.run_script("actions/configure-alerting/20configure", custom_packs_payload)
+
+    # Simulate Restic restore into clean Hub home (where config/ starts empty!)
+    await hub.run_script("bin/module-dump-state", validate_io=False)
+    restored_hub = NS8ModuleInstance(
+        kind="hub",
+        install_dir=tmp_path / "hub_live_ns8_restored",
+        module_id="central-monitoring-hub2",
+        backends=live_backends,
+    )
+    hub.copy_restic_snapshot_to(restored_hub.install_dir)
+    orig_env = json.loads(hub.meta_file.read_text(encoding="utf-8"))["persisted_env"]
+    await restored_hub.run_script(
+        "actions/restore-module/06copyenv", {"environment": orig_env}, validate_io=False
+    )
+    await restored_hub.run_script("actions/restore-module/50configure", {}, validate_io=False)
+
+    restored_bb = (restored_hub.config_dir / "blackbox" / "blackbox.yml").read_text(encoding="utf-8")
+    for mod_token in expected_bb_modules:
+        assert mod_token in restored_bb
+    assert list((restored_hub.config_dir / "prometheus" / "file_sd" / "blackbox").glob("*.json"))
+    assert list((restored_hub.config_dir / "prometheus" / "file_sd" / "snmp").glob("*.json"))
+    assert "ups-restore-ro" in (restored_hub.config_dir / "snmp" / "snmp.yml").read_text(
+        encoding="utf-8"
+    )
+    restored_rules = sorted(
+        p.name for p in (restored_hub.config_dir / "prometheus" / "rules").glob("*.yml")
+    )
+    assert restored_rules == ["ns8-cluster.yml", "proxmox-ve.yml"]
+
+    # Simulate clone-module into clean Hub home and verify probe/target/rule configs re-render too
+    cloned_hub = NS8ModuleInstance(
+        kind="hub",
+        install_dir=tmp_path / "hub_live_ns8_cloned",
+        module_id="central-monitoring-hub3",
+        backends=live_backends,
+    )
+    shutil.copytree(restored_hub.state_dir, cloned_hub.state_dir, dirs_exist_ok=True)
+    await cloned_hub.run_script(
+        "actions/clone-module/50configure",
+        {"host": "monitoring-clone.msp.example.com"},
+        validate_io=False,
+    )
+    cloned_bb = (cloned_hub.config_dir / "blackbox" / "blackbox.yml").read_text(encoding="utf-8")
+    for mod_token in expected_bb_modules:
+        assert mod_token in cloned_bb
+    assert list((cloned_hub.config_dir / "prometheus" / "file_sd" / "blackbox").glob("*.json"))
+    assert list((cloned_hub.config_dir / "prometheus" / "file_sd" / "snmp").glob("*.json"))
+    assert "ups-restore-ro" in (cloned_hub.config_dir / "snmp" / "snmp.yml").read_text(
+        encoding="utf-8"
+    )
+    cloned_rules = sorted(
+        p.name for p in (cloned_hub.config_dir / "prometheus" / "rules").glob("*.yml")
+    )
+    assert cloned_rules == ["ns8-cluster.yml", "proxmox-ve.yml"]
+
 
 
 

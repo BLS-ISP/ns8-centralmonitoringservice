@@ -180,13 +180,11 @@ def hub_env(
             },
         ],
     }
-    (state_dir / "tenants.json").write_text(
-        json.dumps(tenants_payload, indent=2) + "\n", encoding="utf-8", newline="\n"
+    (state_dir / "tenants.json").write_bytes(
+        (json.dumps(tenants_payload, indent=2) + "\n").encode("utf-8")
     )
-    (state_dir / "smarthost.env").write_text(
-        "SMARTHOST_ENABLED=1\nSMARTHOST_HOST=127.0.0.1\nSMARTHOST_PORT=2525\nSMARTHOST_TLS=0\n",
-        encoding="utf-8",
-        newline="\n",
+    (state_dir / "smarthost.env").write_bytes(
+        b"SMARTHOST_ENABLED=1\nSMARTHOST_HOST=127.0.0.1\nSMARTHOST_PORT=2525\nSMARTHOST_TLS=0\n"
     )
 
     env_overrides = {

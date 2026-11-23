@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """NS8 Rule #5: Pull updated container images during update-module (never in systemd)."""
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

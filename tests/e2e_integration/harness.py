@@ -762,7 +762,7 @@ def _load_meta() -> dict[str, Any]:
 def _save_meta(meta: dict[str, Any]) -> None:
     p = _meta_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(meta, indent=2) + "\\n", encoding="utf-8", newline="\\n")
+    p.write_bytes((json.dumps(meta, indent=2) + "\\n").encode("utf-8"))
 
 
 _PENDING_ENV: dict[str, str] | None = None
@@ -805,7 +805,7 @@ def dump_env() -> None:
             lines.append(f'{k}="{esc}"')
         else:
             lines.append(f"{k}={v}")
-    env_path.write_text("\\n".join(lines) + "\\n", encoding="utf-8", newline="\\n")
+    env_path.write_bytes(("\\n".join(lines) + "\\n").encode("utf-8"))
 
 
 def read_envfile(path: str | Path) -> dict[str, str]:
@@ -900,7 +900,7 @@ def run(agent_id: str, action: str, data: dict[str, Any] | None = None, **_kwarg
     meta.setdefault("task_calls", []).append(
         {"agent_id": agent_id, "action": action, "data": data or {}}
     )
-    p.write_text(json.dumps(meta, indent=2) + "\\n", encoding="utf-8", newline="\\n")
+    p.write_bytes((json.dumps(meta, indent=2) + "\\n").encode("utf-8"))
     return {"exit_code": 0, "output": {"status": "ok"}, "error": ""}
 '''
 
@@ -935,15 +935,9 @@ class Ldapproxy:
 def _install_fake_agent_pkg(pkg_root: Path) -> Path:
     agent_dir = pkg_root / "agent"
     agent_dir.mkdir(parents=True, exist_ok=True)
-    (agent_dir / "__init__.py").write_text(
-        _FAKE_AGENT_INIT_PY, encoding="utf-8", newline="\n"
-    )
-    (agent_dir / "tasks.py").write_text(
-        _FAKE_AGENT_TASKS_PY, encoding="utf-8", newline="\n"
-    )
-    (agent_dir / "ldapproxy.py").write_text(
-        _FAKE_AGENT_LDAPPROXY_PY, encoding="utf-8", newline="\n"
-    )
+    (agent_dir / "__init__.py").write_bytes(_FAKE_AGENT_INIT_PY.encode("utf-8"))
+    (agent_dir / "tasks.py").write_bytes(_FAKE_AGENT_TASKS_PY.encode("utf-8"))
+    (agent_dir / "ldapproxy.py").write_bytes(_FAKE_AGENT_LDAPPROXY_PY.encode("utf-8"))
     return pkg_root
 
 
@@ -1044,12 +1038,10 @@ class NS8ModuleInstance:
             },
             "backups": {},
         }
-        self.meta_file.write_text(
-            json.dumps(meta, indent=2) + "\n", encoding="utf-8", newline="\n"
-        )
+        self.meta_file.write_bytes((json.dumps(meta, indent=2) + "\n").encode("utf-8"))
         if not self.env_file.exists():
             lines = [f"{k}={v}" for k, v in sorted(initial_env.items())]
-            self.env_file.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+            self.env_file.write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
 
     def read_meta(self) -> dict[str, Any]:
         return json.loads(self.meta_file.read_text(encoding="utf-8"))
@@ -1057,9 +1049,7 @@ class NS8ModuleInstance:
     def set_routes_in_use(self, domains: list[str]) -> None:
         meta = self.read_meta()
         meta["routes_in_use"] = list(domains)
-        self.meta_file.write_text(
-            json.dumps(meta, indent=2) + "\n", encoding="utf-8", newline="\n"
-        )
+        self.meta_file.write_bytes((json.dumps(meta, indent=2) + "\n").encode("utf-8"))
 
     def _build_subprocess_env(
         self,

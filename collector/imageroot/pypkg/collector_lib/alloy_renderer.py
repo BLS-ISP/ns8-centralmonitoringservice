@@ -885,6 +885,8 @@ def render_alloy_river(cfg: CollectorConfig, targets: list[dict[str, Any]]) -> s
         )
 
     # 4. WAL-Backed Outbound HTTPS Delivery to Central Monitoring Hub
+    remote_write_url = _river_str(hub_base + "/api/v1/write")
+    loki_push_url = _river_str(hub_base + "/loki/api/v1/push")
     lines.extend(
         [
             "",
@@ -893,7 +895,7 @@ def render_alloy_river(cfg: CollectorConfig, targets: list[dict[str, Any]]) -> s
             "// ----------------------------------------------------------------------------",
             'prometheus.remote_write "hub" {',
             "  endpoint {",
-            f"    url               = {_river_str(f'{hub_base}/api/v1/write')}",
+            f"    url               = {remote_write_url}",
             '    bearer_token_file = "/etc/alloy/secrets/hub.token"',
             "",
             "    tls_config {",
@@ -924,7 +926,7 @@ def render_alloy_river(cfg: CollectorConfig, targets: list[dict[str, Any]]) -> s
             "",
             'loki.write "hub" {',
             "  endpoint {",
-            f"    url               = {_river_str(f'{hub_base}/loki/api/v1/push')}",
+            f"    url               = {loki_push_url}",
             '    bearer_token_file = "/etc/alloy/secrets/hub.token"',
             "",
             "    tls_config {",
@@ -958,22 +960,36 @@ def render_collector_artifacts(
     cfg: CollectorConfig,
     targets: list[dict[str, Any]],
 ) -> RenderResult:
-    """Write hub.token (0600), pve.yml (0600), snmp-auths.yml (0600), and config.alloy."""
+    """Write hub.token (0600), pve.yml (0600), snmp-auths.yml (0600), and config.alloy.
+
+    Writes config.alloy and pve.yml into dedicated mounted directories
+    (state_dir/alloy-conf/config.alloy and state_dir/pve-conf/pve.yml) in addition
+    to state_dir/config.alloy and state_dir/pve.yml so atomic os.replace() updates
+    are immediately visible inside running Podman containers on live reload.
+    """
     secrets_dir = state_dir / "secrets"
+    alloy_conf_dir = state_dir / "alloy-conf"
+    pve_conf_dir = state_dir / "pve-conf"
     secrets_dir.mkdir(parents=True, exist_ok=True)
+    alloy_conf_dir.mkdir(parents=True, exist_ok=True)
+    pve_conf_dir.mkdir(parents=True, exist_ok=True)
     (state_dir / "textfile").mkdir(parents=True, exist_ok=True)
     (state_dir / "alloy-wal").mkdir(parents=True, exist_ok=True)
 
     token_file = save_stored_auth_token(state_dir, cfg.auth_token)
 
+    pve_yaml = _render_pve_yaml(targets)
     pve_config_path = state_dir / "pve.yml"
-    atomic_write_text(pve_config_path, _render_pve_yaml(targets), mode=0o600)
+    atomic_write_text(pve_config_path, pve_yaml, mode=0o600)
+    atomic_write_text(pve_conf_dir / "pve.yml", pve_yaml, mode=0o600)
 
     snmp_auths_path = secrets_dir / "snmp-auths.yml"
     atomic_write_text(snmp_auths_path, _render_snmp_auths_yaml(targets), mode=0o600)
 
+    alloy_river = render_alloy_river(cfg, targets)
     alloy_config_path = state_dir / "config.alloy"
-    atomic_write_text(alloy_config_path, render_alloy_river(cfg, targets), mode=0o600)
+    atomic_write_text(alloy_config_path, alloy_river, mode=0o600)
+    atomic_write_text(alloy_conf_dir / "config.alloy", alloy_river, mode=0o600)
 
     return RenderResult(
         alloy_config_path=alloy_config_path,

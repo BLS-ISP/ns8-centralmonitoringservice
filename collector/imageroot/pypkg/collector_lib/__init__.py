@@ -1,5 +1,7 @@
 """NS8 Central Monitoring Site Collector Python library (collector_lib)."""
 
+from __future__ import annotations
+
 from collector_lib.alloy_renderer import (
     CollectorConfig,
     RenderResult,

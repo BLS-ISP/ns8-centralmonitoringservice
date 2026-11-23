@@ -299,12 +299,14 @@ def render_alertmanager_yaml(
             ]
         )
     for slug, _ in customer_routes:
+        cust_matcher = f'customer="{slug}"'
+        cust_receiver = f"customer-email-{slug}"
         route_entries.append(
             [
                 "    - matchers:",
                 '        - "test_channel=\\"customer_email\\""',
-                f"        - {yaml_quote(f'customer=\"{slug}\"')}",
-                f"      receiver: {yaml_quote(f'customer-email-{slug}')}",
+                f"        - {yaml_quote(cust_matcher)}",
+                f"      receiver: {yaml_quote(cust_receiver)}",
                 "      continue: false",
             ]
         )
@@ -355,13 +357,15 @@ def render_alertmanager_yaml(
         )
     cust_sev = _severity_matcher(str(cust_cfg.get("min_severity") or "critical"))
     for slug, _ in customer_routes:
+        cust_matcher = f'customer="{slug}"'
+        cust_receiver = f"customer-email-{slug}"
         route_entries.append(
             [
                 "    - matchers:",
                 '        - "test_channel=\\"\\""',
-                f"        - {yaml_quote(f'customer=\"{slug}\"')}",
+                f"        - {yaml_quote(cust_matcher)}",
                 f"        - {yaml_quote(cust_sev)}",
-                f"      receiver: {yaml_quote(f'customer-email-{slug}')}",
+                f"      receiver: {yaml_quote(cust_receiver)}",
                 "      continue: true",
             ]
         )
@@ -517,6 +521,26 @@ def _render_email_receiver(
     return block
 
 
+def render_all_probe_configs(state_dir: str | Path | None = None) -> dict[str, Any]:
+    """Unconditionally render full 8-module blackbox.yml, target file_sd/federation/snmp.yml, and rule packs."""
+    sdir = resolve_state_dir(state_dir)
+    cdir = resolve_config_dir(sdir)
+
+    render_blackbox_config(cdir / "blackbox" / "blackbox.yml", state_dir=sdir)
+
+    targets_store = load_json_file(sdir / "targets.json", {"targets": []})
+    targets_list = list(targets_store.get("targets", []))
+    sync_target_configs(targets_list, state_dir=sdir)
+
+    cfg = {**_default_alerting_config(), **load_json_file(sdir / "alerting.json", {})}
+    rule_packs = sync_rule_packs(cfg.get("enabled_rule_packs"), state_dir=sdir, reload_prometheus=False)
+
+    return {
+        "targets_synced": len(targets_list),
+        "enabled_rule_packs": [p["pack_id"] for p in rule_packs if p.get("enabled")],
+    }
+
+
 def sync_alertmanager(state_dir: str | Path | None = None) -> bool:
     """Re-render alertmanager.yml (and ensure baseline probe/rule configs exist) then reload Alertmanager.
 
@@ -554,9 +578,10 @@ def sync_alertmanager(state_dir: str | Path | None = None) -> bool:
         rendered_am = render_alertmanager_yaml(cfg, secrets, smarthost_info, tenants_map)
         atomic_write_text(cdir / "alertmanager" / "alertmanager.yml", rendered_am, mode=0o600)
 
-    # Ensure baseline probe & rule configs exist on first-boot configure-module
-    if not (cdir / "blackbox" / "blackbox.yml").is_file():
-        render_blackbox_config(cdir / "blackbox" / "blackbox.yml", state_dir=sdir)
+    # Ensure baseline probe & rule configs exist (and replace any 2-module bootstrap stub)
+    bb_file = cdir / "blackbox" / "blackbox.yml"
+    if not bb_file.is_file() or "http_post_2xx:" not in bb_file.read_text(encoding="utf-8"):
+        render_blackbox_config(bb_file, state_dir=sdir)
     if not (cdir / "snmp" / "snmp.yml").is_file() or not (cdir / "prometheus" / "federation_jobs.yml").is_file():
         targets_store = load_json_file(sdir / "targets.json", {"targets": []})
         sync_target_configs(list(targets_store.get("targets", [])), state_dir=sdir)

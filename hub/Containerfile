@@ -32,7 +32,7 @@ LABEL org.opencontainers.image.title="Central Monitoring Hub" \
       org.nethserver.tcp-ports-demand="1" \
       org.nethserver.rootfull="0" \
       org.nethserver.min-core="3.0.0" \
-      org.nethserver.volumes="prometheus-data loki-data alertmanager-data grafana-data" \
+      org.nethserver.volumes="prometheus-data loki-data alertmanager-data grafana-data thanos-store-data" \
       org.nethserver.images="${GATEWAY_IMAGE} quay.io/prometheus/prometheus:v2.54.1 quay.io/prometheus/alertmanager:v0.27.0 docker.io/grafana/loki:3.1.1 docker.io/grafana/grafana-oss:11.2.2 quay.io/prometheuscommunity/prom-label-proxy:v0.11.0 quay.io/prometheus/blackbox-exporter:v0.25.0 quay.io/prometheus/snmp-exporter:v0.26.0 quay.io/thanos/thanos:v0.36.1"
 
 ENTRYPOINT [ "/" ]

@@ -110,14 +110,12 @@ def test_med03_delete_silence_rejects_path_traversal_silence_id(hub_env: dict[st
 def test_arch09_discover_smarthost_reads_encrypt_smtp_keys(tmp_path: Path) -> None:
     sdir = tmp_path / "state"
     sdir.mkdir(parents=True)
-    (sdir / "smarthost.env").write_text(
-        "SMARTHOST_ENABLED=true\n"
-        "SMARTHOST_HOST=smtp.relay.example.com\n"
-        "SMARTHOST_PORT=587\n"
-        "SMARTHOST_ENCRYPT_SMTP=starttls\n"
-        "ENCRYPT_SMTP=starttls\n",
-        encoding="utf-8",
-        newline="\n",
+    (sdir / "smarthost.env").write_bytes(
+        b"SMARTHOST_ENABLED=true\n"
+        b"SMARTHOST_HOST=smtp.relay.example.com\n"
+        b"SMARTHOST_PORT=587\n"
+        b"SMARTHOST_ENCRYPT_SMTP=starttls\n"
+        b"ENCRYPT_SMTP=starttls\n"
     )
     info = discover_smarthost_env(sdir)
     assert info["available"] is True
@@ -336,3 +334,247 @@ def test_phase2_qnap_and_printer_snmp_profiles_and_snmp_printer_role(
             state_dir=hub_env["state_dir"],
         )
     assert sil_role_exc.value.field == "device_role"
+
+
+def test_python39_strict_syntax_and_runtime_compatibility() -> None:
+    """Enforce Rocky Linux 9 (/usr/bin/python3 = Python 3.9) syntax & runtime compatibility across all owned files."""
+    import ast
+    from tests.hub_probes_alerting.conftest import ACTIONS_DIR, PYPKG_DIR, REPO_ROOT
+    from tests.hub_probes_alerting.test_silences_and_schemas import OWNED_ACTIONS
+
+    runtime_files: list[Path] = sorted(
+        [p for p in (PYPKG_DIR / "hub_alerting").rglob("*.py")]
+        + [
+            p
+            for action in OWNED_ACTIONS
+            for p in (ACTIONS_DIR / action).iterdir()
+            if p.is_file() and not p.name.endswith(".json")
+        ]
+    )
+    assert len(runtime_files) == 17
+    test_files: list[Path] = sorted(
+        p for p in (REPO_ROOT / "tests" / "hub_probes_alerting").rglob("*.py") if p.stat().st_size > 0
+    )
+    target_files = runtime_files + test_files
+
+    forbidden_py310_attrs = {
+        ("datetime", "UTC"),
+        ("typing", "Self"),
+        ("typing", "TypeAlias"),
+        ("typing", "Never"),
+        ("typing", "Required"),
+        ("typing", "NotRequired"),
+    }
+
+    violations: list[str] = []
+    for fpath in target_files:
+        src = fpath.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(src, filename=str(fpath), feature_version=(3, 9))
+        except SyntaxError as exc:
+            violations.append(f"{fpath}:{exc.lineno}: Python 3.9 SyntaxError: {exc.msg}")
+            continue
+
+        has_future_annotations = any(
+            isinstance(stmt, ast.ImportFrom)
+            and stmt.module == "__future__"
+            and any(alias.name == "annotations" for alias in stmt.names)
+            for stmt in tree.body
+            if isinstance(stmt, (ast.ImportFrom, ast.Expr))
+        )
+        if not has_future_annotations:
+            violations.append(f"{fpath}: missing 'from __future__ import annotations'")
+
+        # Collect annotation node IDs so we also catch unannotated runtime `X = A | B` unions
+        ann_node_ids: set[int] = set()
+        for n in ast.walk(tree):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if n.returns:
+                    ann_node_ids.update(id(x) for x in ast.walk(n.returns))
+                all_args = (
+                    list(n.args.posonlyargs)
+                    + list(n.args.args)
+                    + list(n.args.kwonlyargs)
+                    + ([n.args.vararg] if n.args.vararg else [])
+                    + ([n.args.kwarg] if n.args.kwarg else [])
+                )
+                for arg in all_args:
+                    if arg.annotation:
+                        ann_node_ids.update(id(x) for x in ast.walk(arg.annotation))
+            elif isinstance(n, ast.AnnAssign) and n.annotation:
+                ann_node_ids.update(id(x) for x in ast.walk(n.annotation))
+
+        for node in ast.walk(tree):
+            # 1. No Python 3.10+ match/case or Python 3.11+ except* or Python 3.12+ type params
+            if hasattr(ast, "Match") and isinstance(node, ast.Match):
+                violations.append(f"{fpath}:{node.lineno}: Python 3.10+ match/case statement")
+            if hasattr(ast, "TryStar") and isinstance(node, ast.TryStar):
+                violations.append(f"{fpath}:{node.lineno}: Python 3.11+ except* statement")
+            if getattr(node, "type_params", None):
+                violations.append(f"{fpath}:{node.lineno}: Python 3.12+ PEP 695 type_params")
+
+            # 2. No isinstance(x, A | B) / issubclass(x, A | B), zip(strict=...), or fromisoformat in runtime pkg
+            if isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name) and node.func.id in {"isinstance", "issubclass"}:
+                    if len(node.args) >= 2 and isinstance(node.args[1], ast.BinOp) and isinstance(
+                        node.args[1].op, ast.BitOr
+                    ):
+                        violations.append(f"{fpath}:{node.lineno}: runtime union in {node.func.id}()")
+                if isinstance(node.func, ast.Name) and node.func.id == "zip":
+                    if any(kw.arg == "strict" for kw in node.keywords):
+                        violations.append(f"{fpath}:{node.lineno}: Python 3.10+ zip(strict=...)")
+                if (
+                    fpath in runtime_files
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "fromisoformat"
+                ):
+                    violations.append(f"{fpath}:{node.lineno}: avoid datetime.fromisoformat (Python 3.9 Z/nano trap)")
+                if (
+                    isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "write_text"
+                    and any(kw.arg == "newline" for kw in node.keywords)
+                ):
+                    violations.append(f"{fpath}:{node.lineno}: Python 3.10+ Path.write_text(newline=...)")
+
+            # 3. No Python 3.11+ tomllib or forbidden typing/datetime attributes
+            if isinstance(node, ast.Import) and any(a.name == "tomllib" for a in node.names):
+                violations.append(f"{fpath}:{node.lineno}: Python 3.11+ tomllib import")
+            if isinstance(node, ast.ImportFrom) and node.module in {"datetime", "typing"}:
+                for alias in node.names:
+                    if (node.module, alias.name) in forbidden_py310_attrs:
+                        violations.append(f"{fpath}:{node.lineno}: Python 3.10+ {node.module}.{alias.name}")
+            if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+                if (node.value.id, node.attr) in forbidden_py310_attrs:
+                    violations.append(f"{fpath}:{node.lineno}: Python 3.10+ {node.value.id}.{node.attr}")
+
+            # 4. No PEP 701 (Python 3.12+) f-string constructs
+            if isinstance(node, ast.JoinedStr):
+                jseg = ast.get_source_segment(src, node) or ""
+                stripped = jseg.lstrip("fFrR")
+                is_triple = stripped.startswith(('"""', "'''"))
+                outer_quote = stripped[:3] if is_triple else stripped[:1]
+                for val in node.values:
+                    if isinstance(val, ast.FormattedValue):
+                        vseg = ast.get_source_segment(src, val) or ""
+                        if "\\" in vseg:
+                            violations.append(f"{fpath}:{val.lineno}: PEP 701 backslash in f-string {vseg}")
+                        if not is_triple and "\n" in vseg:
+                            violations.append(f"{fpath}:{val.lineno}: PEP 701 newline in f-string {vseg}")
+                        if "#" in vseg:
+                            violations.append(f"{fpath}:{val.lineno}: PEP 701 comment in f-string {vseg}")
+                        for sub in ast.walk(val):
+                            if sub is not val and isinstance(sub, ast.JoinedStr):
+                                violations.append(f"{fpath}:{val.lineno}: nested f-string {jseg}")
+                        inner_expr = vseg[1:-1]
+                        if outer_quote and outer_quote in inner_expr:
+                            violations.append(
+                                f"{fpath}:{val.lineno}: PEP 701 quote reuse ({outer_quote}) in f-string {jseg}"
+                            )
+
+    assert not violations, "Python 3.9 compatibility violations:\n" + "\n".join(violations)
+
+
+@pytest.mark.parametrize(
+    "rfc3339_sample",
+    [
+        "2026-11-23T10:15:30Z",
+        "2026-11-23t10:15:30z",
+        "2026-11-23T10:15:30.4Z",
+        "2026-11-23T10:15:30.42Z",
+        "2026-11-23T10:15:30.123Z",
+        "2026-11-23T10:15:30.123456789Z",
+        "2026-11-23T11:15:30.123456789+01:00",
+        "2026-11-23T05:15:30-0500",
+    ],
+)
+def test_python39_rfc3339_parser_handles_go_nanoseconds_and_offsets_without_py311_fromisoformat(
+    rfc3339_sample: str,
+) -> None:
+    from hub_alerting.silences_manager import _parse_rfc3339
+
+    parsed = _parse_rfc3339(rfc3339_sample, "starts_at")
+    assert parsed.year == 2026
+    assert parsed.hour == 10
+    assert parsed.minute == 15
+    assert parsed.second == 30
+
+
+def test_live_ns8_02_render_all_probe_configs_overwrites_stub_and_restores_targets_and_rules(
+    hub_env: dict[str, Any],
+) -> None:
+    from hub_alerting import render_all_probe_configs as pkg_render_all
+    from hub_alerting.alertmanager_config import render_all_probe_configs
+
+    state_dir: Path = hub_env["state_dir"]
+    config_dir: Path = hub_env["config_dir"]
+    run_action = hub_env["run_action"]
+
+    # Save a target and custom rule-pack subset into state_dir
+    saved = run_action(
+        "save-target",
+        "20save",
+        {
+            "name": "Restored Blackbox Probe",
+            "enabled": True,
+            "target_type": "blackbox",
+            "customer": "acme-corp",
+            "site": "hq",
+            "device_role": "web",
+            "endpoints": ["https://app.acme.example.com"],
+            "blackbox_module": "http_post_2xx",
+            "tls_skip_verify": True,
+        },
+    )
+    run_action(
+        "configure-alerting",
+        "20configure",
+        {
+            "smarthost_email": {
+                "enabled": False,
+                "use_ns8_smarthost": True,
+                "from_address": "alerts@msp.example.com",
+                "default_to_addresses": [],
+            },
+            "webhook_psa": {"enabled": False, "url": ""},
+            "chat": {"teams_enabled": False, "slack_enabled": False},
+            "push": {"enabled": False, "provider": "none"},
+            "customer_email_routing": {"enabled": False, "min_severity": "critical"},
+            "enabled_rule_packs": ["ns8-cluster", "snmp-network-ups"],
+        },
+    )
+
+    # Simulate Restic restore / create-module state: wipe rendered config_dir and write a 2-module stub blackbox.yml
+    import shutil
+
+    shutil.rmtree(config_dir)
+    stub_bb = config_dir / "blackbox" / "blackbox.yml"
+    stub_bb.parent.mkdir(parents=True, exist_ok=True)
+    stub_bb.write_bytes(b"modules:\n  http_2xx:\n    prober: http\n  tcp_connect:\n    prober: tcp\n")
+
+    summary = render_all_probe_configs(state_dir)
+    assert pkg_render_all is not None
+    assert summary["targets_synced"] == 1
+
+    # 1. Stub blackbox.yml must be replaced with full 8-module config
+    bb_text = stub_bb.read_text(encoding="utf-8")
+    for mod in (
+        "http_2xx:",
+        "http_2xx_insecure:",
+        "http_post_2xx:",
+        "http_post_2xx_insecure:",
+        "tcp_connect:",
+        "dns_tcp:",
+        "dns_udp:",
+        "icmp:",
+    ):
+        assert mod in bb_text
+
+    # 2. Restored file_sd, federation_jobs.yml, and snmp.yml must exist
+    restored_sd = config_dir / "prometheus" / "file_sd" / "blackbox" / f"{saved['id']}.json"
+    assert restored_sd.is_file()
+    assert (config_dir / "prometheus" / "federation_jobs.yml").is_file()
+    assert (config_dir / "snmp" / "snmp.yml").is_file()
+
+    # 3. Restored rule packs from state/alerting.json must be materialized
+    deployed_rules = sorted(p.name for p in (config_dir / "prometheus" / "rules").glob("*.yml"))
+    assert deployed_rules == ["ns8-cluster.yml", "snmp-network-ups.yml"]

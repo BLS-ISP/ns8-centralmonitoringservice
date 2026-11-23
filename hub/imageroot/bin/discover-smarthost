@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Discover NS8 cluster/smarthost settings from Redis and write state/smarthost.env."""
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

@@ -61,12 +61,13 @@ def render_thanos_objstore_yaml(
     """Render Thanos S3 objstore.yml deterministically without PyYAML."""
     lookup_type = "path" if path_style else "auto"
     insecure_str = "true" if insecure else "false"
+    effective_region = region or "us-east-1"
     lines = [
         "type: S3",
         "config:",
         f"  bucket: {yaml_quote(bucket)}",
         f"  endpoint: {yaml_quote(endpoint)}",
-        f"  region: {yaml_quote(region or 'us-east-1')}",
+        f"  region: {yaml_quote(effective_region)}",
         f"  access_key: {yaml_quote(access_key)}",
         f"  secret_key: {yaml_quote(secret_key)}",
         f"  insecure: {insecure_str}",
@@ -120,6 +121,7 @@ def render_loki_storage_blocks(
 ) -> tuple[str, str, str]:
     """Return (object_store, storage_config_block, delete_request_store) for Loki v3 TSDB v13."""
     if storage_mode == "s3":
+        effective_region = region or "us-east-1"
         insecure_str = "true" if insecure else "false"
         path_style_str = "true" if path_style else "false"
         storage_block = "\n".join(
@@ -131,7 +133,7 @@ def render_loki_storage_blocks(
                 "  aws:",
                 f"    endpoint: {yaml_quote(endpoint)}",
                 f"    bucketnames: {yaml_quote(bucket)}",
-                f"    region: {yaml_quote(region or 'us-east-1')}",
+                f"    region: {yaml_quote(effective_region)}",
                 f"    access_key_id: {yaml_quote(access_key)}",
                 f"    secret_access_key: {yaml_quote(secret_key)}",
                 f"    insecure: {insecure_str}",

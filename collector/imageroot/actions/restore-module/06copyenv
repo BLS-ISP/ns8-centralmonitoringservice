@@ -36,7 +36,8 @@ def main() -> int:
     state_dir = get_state_dir()
 
     if not isinstance(original_env, dict):
-        original_env = agent.read_envfile(state_dir / "environment")
+        env_path = state_dir / "environment"
+        original_env = agent.read_envfile(str(env_path)) if env_path.is_file() else {}
 
     for key in PRESERVED_KEYS:
         if key in original_env:

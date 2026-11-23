@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-from collections.abc import Callable
 from contextlib import contextmanager
 import json
 import os
@@ -12,7 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 from urllib.parse import urlparse
@@ -26,6 +25,7 @@ __all__ = [
     "load_json_file",
     "load_tenants_map",
     "pod_http_request",
+    "render_all_probe_configs",
     "resolve_config_dir",
     "resolve_state_dir",
     "trigger_http_reload",
@@ -275,6 +275,13 @@ def trigger_http_reload(url: str, timeout: float = 3.0) -> bool:
     """POST to Prometheus/Alertmanager/SNMP-Exporter /-/reload lifecycle endpoint (pod-netns aware)."""
     status, _ = pod_http_request(url, method="POST", data=b"", timeout=timeout)
     return 200 <= status < 300
+
+
+def render_all_probe_configs(state_dir: str | Path | None = None) -> dict[str, Any]:
+    """Unconditionally materialize full 8-module blackbox.yml, targets file_sd/snmp.yml, and enabled rule packs."""
+    from hub_alerting.alertmanager_config import render_all_probe_configs as _impl
+
+    return _impl(state_dir)
 
 
 def emit_validation_error_and_exit(exc: ValidationFailure) -> None:

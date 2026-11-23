@@ -15,7 +15,7 @@ from typing import Any
 from aiohttp import web
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class TokenRecord:
     sha256: str
     token_prefix: str
@@ -34,7 +34,7 @@ def _parse_iso8601_epoch(value: str | None) -> float | None:
     txt = value.strip()
     if not txt:
         return None
-    if txt.endswith("Z"):
+    if txt.endswith(("Z", "z")):
         txt = txt[:-1] + "+00:00"
     dt = datetime.fromisoformat(txt)
     if dt.tzinfo is None:

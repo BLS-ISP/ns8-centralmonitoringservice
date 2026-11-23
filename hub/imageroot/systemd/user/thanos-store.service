@@ -22,8 +22,8 @@ ExecStart=/usr/bin/podman run \
     --restart=on-failure \
     --sdnotify=conmon \
     --user 0:0 \
-    --volume=%E/config/thanos/objstore.yml:/etc/thanos/objstore.yml:ro,Z \
-    --volume=thanos-store-data:/var/thanos/store:Z \
+    --volume=%E/config/thanos:/etc/thanos:ro,z \
+    --volume=thanos-store-data:/var/thanos/store:z \
     ${THANOS_IMAGE} \
     store \
     --data-dir=/var/thanos/store \
