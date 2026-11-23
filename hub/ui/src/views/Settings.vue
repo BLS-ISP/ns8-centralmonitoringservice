@@ -681,7 +681,11 @@ export default {
     },
     openGrafana() {
       if (this.grafanaUrl) {
-        window.open(this.grafanaUrl, "_blank", "noopener,noreferrer");
+        const clean = this.grafanaUrl.replace(/\/+$/, "");
+        const targetUrl = clean.includes("orgId=")
+          ? clean
+          : `${clean}${clean.includes("?") ? "&" : "/?"}orgId=1`;
+        window.open(targetUrl, "_blank", "noopener,noreferrer");
       }
     },
     formatLdapGroupOption(grp) {

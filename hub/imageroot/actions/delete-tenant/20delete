@@ -51,6 +51,12 @@ def main() -> None:
         cleanup_deleted_tenant_if_running(state_dir, os.environ, removed)
         sync_all_orgs_if_running(state_dir, os.environ)
         try:
+            from hub_tenancy.ldap_sync import sync_ldap_config
+
+            sync_ldap_config(state_dir, os.environ)
+        except Exception:
+            pass
+        try:
             from hub_alerting.alertmanager_config import sync_alertmanager
 
             sync_alertmanager(state_dir)

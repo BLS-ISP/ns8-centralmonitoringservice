@@ -185,15 +185,44 @@ class MockGrafanaState:
                 "id": 1,
                 "login": "admin",
                 "email": "admin@localhost",
+                "orgId": 1,
                 "isDisabled": False,
                 "isGrafanaAdmin": True,
             }
         }
         # org_id -> {user_id -> role}
         self.org_members: dict[int, dict[int, str]] = {1: {1: "Admin"}}
+        self.org_preferences: dict[int, dict[str, Any]] = {1: {}}
+        self.org_switch_calls: list[tuple[int, int]] = []
         self.deleted_user_ids: set[int] = set()
         self.ldap_reloads: int = 0
         self.ds_proxy_hits: list[tuple[str, str]] = []
+
+    def add_org1_user(
+        self,
+        *,
+        login: str,
+        email: str,
+        org1_role: str,
+        is_external: bool = True,
+        is_grafana_admin: bool = False,
+        auth_labels: list[str] | None = None,
+    ) -> int:
+        uid = self.next_user_id
+        self.next_user_id += 1
+        self.users[uid] = {
+            "id": uid,
+            "login": login,
+            "email": email,
+            "name": login,
+            "orgId": 1,
+            "isDisabled": False,
+            "isGrafanaAdmin": is_grafana_admin,
+            "isExternal": is_external,
+            "authLabels": list(auth_labels) if auth_labels is not None else (["LDAP"] if is_external else []),
+        }
+        self.org_members.setdefault(1, {})[uid] = org1_role
+        return uid
 
 
 @dataclass
@@ -479,7 +508,20 @@ class LiveObservabilityBackends:
             state.folders.pop(oid, None)
             state.dashboards.pop(oid, None)
             state.org_members.pop(oid, None)
+            state.org_preferences.pop(oid, None)
             return web.json_response({"message": "Organization deleted"})
+
+        async def get_org_preferences(req: web.Request) -> web.Response:
+            oid = _org_id(req)
+            return web.json_response(state.org_preferences.get(oid, {}))
+
+        async def put_org_preferences(req: web.Request) -> web.Response:
+            oid = _org_id(req)
+            body = await req.json()
+            prefs = state.org_preferences.setdefault(oid, {})
+            if isinstance(body, dict):
+                prefs.update(body)
+            return web.json_response({"message": "Preferences updated"})
 
         async def get_ds_by_uid(req: web.Request) -> web.Response:
             oid = _org_id(req)
@@ -535,6 +577,12 @@ class LiveObservabilityBackends:
                     return web.json_response(u)
             return web.json_response({"message": "User not found"}, status=404)
 
+        async def get_user_by_id(req: web.Request) -> web.Response:
+            uid = int(req.match_info["uid"])
+            if uid not in state.users:
+                return web.json_response({"message": "User not found"}, status=404)
+            return web.json_response(state.users[uid])
+
         async def admin_create_user(req: web.Request) -> web.Response:
             body = await req.json()
             uid = state.next_user_id
@@ -545,6 +593,7 @@ class LiveObservabilityBackends:
                 "email": body.get("email", ""),
                 "name": body.get("name", ""),
                 "password": body.get("password", ""),
+                "orgId": 1,
                 "isDisabled": False,
                 "isGrafanaAdmin": False,
             }
@@ -634,7 +683,12 @@ class LiveObservabilityBackends:
             del members[uid]
             return web.json_response({"message": "User removed from organization"})
 
-        async def switch_user_org(_req: web.Request) -> web.Response:
+        async def switch_user_org(req: web.Request) -> web.Response:
+            uid = int(req.match_info["uid"])
+            oid = int(req.match_info["oid"])
+            state.org_switch_calls.append((uid, oid))
+            if uid in state.users:
+                state.users[uid]["orgId"] = oid
             return web.json_response({"message": "Active organization changed"})
 
         async def datasource_proxy(req: web.Request) -> web.Response:
@@ -652,6 +706,8 @@ class LiveObservabilityBackends:
         app.router.add_route("*", "/api/datasources/proxy/{tail:.*}", datasource_proxy)
         app.router.add_get("/", login_page)
         app.router.add_get("/login", login_page)
+        app.router.add_get("/api/org/preferences", get_org_preferences)
+        app.router.add_put("/api/org/preferences", put_org_preferences)
         app.router.add_get("/api/orgs", list_orgs)
         app.router.add_post("/api/orgs", create_org)
         app.router.add_get("/api/orgs/name/{name}", get_org_by_name)
@@ -669,6 +725,7 @@ class LiveObservabilityBackends:
         app.router.add_post("/api/folders", create_folder)
         app.router.add_post("/api/dashboards/db", upsert_dashboard)
         app.router.add_get("/api/users/lookup", lookup_user)
+        app.router.add_get("/api/users/{uid:[0-9]+}", get_user_by_id)
         app.router.add_put("/api/users/{uid:[0-9]+}", update_user)
         app.router.add_post("/api/admin/users", admin_create_user)
         app.router.add_delete("/api/admin/users/{uid:[0-9]+}", admin_delete_user)

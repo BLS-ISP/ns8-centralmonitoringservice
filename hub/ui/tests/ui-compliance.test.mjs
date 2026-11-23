@@ -105,4 +105,47 @@ test("NS8 UI Rule #3: en and de translation parity and mandatory NS8 keys", () =
   for (const rk of requiredKeys) {
     assert.ok(enKeys.includes(rk), `Missing required key ${rk}`);
   }
+
+  // v1.0.3 NsPagination {range} placeholder verification (never {min} or {max})
+  assert.equal(en.pagination.range_of_total_items, "{range} of {total} items");
+  assert.equal(
+    de.pagination.range_of_total_items,
+    "{range} von {total} Einträgen"
+  );
+  const enRaw = fs.readFileSync(enPath, "utf8");
+  const deRaw = fs.readFileSync(dePath, "utf8");
+  assert.ok(!enRaw.includes("{min}") && !enRaw.includes("{max}"));
+  assert.ok(!deRaw.includes("{min}") && !deRaw.includes("{max}"));
+});
+
+test("v1.0.3 UX: simulateCustomerView, ?orgId=1 on MSP Grafana launch, and version 1.0.3", () => {
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(uiRoot, "package.json"), "utf8")
+  );
+  const cfg = JSON.parse(
+    fs.readFileSync(path.join(uiRoot, "public", "config.json"), "utf8")
+  );
+  assert.equal(pkg.version, "1.0.3");
+  assert.equal(cfg.version, "1.0.3");
+
+  const statusSrc = fs.readFileSync(
+    path.join(uiRoot, "src", "views", "Status.vue"),
+    "utf8"
+  );
+  const settingsSrc = fs.readFileSync(
+    path.join(uiRoot, "src", "views", "Settings.vue"),
+    "utf8"
+  );
+  const tenantsSrc = fs.readFileSync(
+    path.join(uiRoot, "src", "views", "Tenants.vue"),
+    "utf8"
+  );
+
+  assert.ok(statusSrc.includes("orgId=1"));
+  assert.ok(settingsSrc.includes("orgId=1"));
+  assert.ok(tenantsSrc.includes("simulateCustomerView"));
+  assert.ok(tenantsSrc.includes("simulate_customer_view_btn"));
+  assert.ok(tenantsSrc.includes("open_filtered_msp_view_btn"));
+  assert.ok(tenantsSrc.includes("simulate_customer_view_modal_btn"));
+  assert.ok(tenantsSrc.includes("enable_portal_now_btn"));
 });

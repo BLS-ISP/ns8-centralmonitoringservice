@@ -47,6 +47,7 @@ DASHBOARD_FILENAMES = (
     "proxmox-snmp-infrastructure.json",
     "web-ssl-uptime.json",
 )
+HOME_DASHBOARD_UID = "ns8-multi-cluster-overview"
 
 _POD_NSENTER_HTTP_HELPER = (
     "import base64, json, sys, urllib.error, urllib.request\n"
@@ -309,6 +310,26 @@ def _lock_dashboard_for_customer(model: dict[str, Any], customer: str) -> dict[s
     return locked
 
 
+def _set_org_home_dashboard(
+    client: GrafanaApiClient,
+    org_id: int,
+    dashboards: list[dict[str, Any]],
+) -> None:
+    """Set the Organization Home Dashboard to `ns8-multi-cluster-overview` when imported."""
+    if not any(m.get("uid") == HOME_DASHBOARD_UID for m in dashboards):
+        return
+    try:
+        client.request(
+            "PUT",
+            "/api/org/preferences",
+            {"homeDashboardUID": HOME_DASHBOARD_UID},
+            org_id=org_id,
+            allow_404=True,
+        )
+    except RuntimeError:
+        pass
+
+
 def _sync_org1(
     client: GrafanaApiClient,
     tenants: list[dict[str, Any]],
@@ -368,6 +389,8 @@ def _sync_org1(
             {"dashboard": m_copy, "folderUid": folder_uid, "overwrite": True},
             org_id=1,
         )
+
+    _set_org_home_dashboard(client, 1, dashboards)
 
 
 def _ensure_customer_org(
@@ -637,6 +660,100 @@ def _sync_portal_users(
         _sync_single_portal_user(client, state_dir, tenant, user_spec, org_id)
 
 
+def _sync_msp_staff_to_customer_orgs(
+    client: GrafanaApiClient,
+    active_customer_org_ids: list[int],
+    globally_active_portal_lower: set[str],
+) -> None:
+    """Propagate verified MSP Org-1 staff (1-way) into active Customer Orgs (`?orgId=<id>`)."""
+    if not active_customer_org_ids:
+        return
+
+    st, org1_users = client.request("GET", "/api/orgs/1/users", org_id=1, allow_404=True)
+    if st != 200 or not isinstance(org1_users, list):
+        return
+
+    admin_login_lower = client.admin_user.strip().lower()
+    msp_staff: list[tuple[int, str, str]] = []
+    seen_uids: set[int] = set()
+
+    for member in org1_users:
+        if not isinstance(member, dict) or "userId" not in member:
+            continue
+        uid = int(member["userId"])
+        if uid in seen_uids:
+            continue
+
+        detail: dict[str, Any] = member
+        try:
+            u_st, u_obj = client.request("GET", f"/api/users/{uid}", allow_404=True)
+            if u_st == 200 and isinstance(u_obj, dict):
+                detail = u_obj
+        except RuntimeError:
+            pass
+
+        login = str(detail.get("login") or member.get("login") or "").strip()
+        login_lower = login.lower()
+        if not login_lower or login_lower in globally_active_portal_lower:
+            continue
+
+        is_verified_msp = (
+            login_lower == admin_login_lower
+            or bool(detail.get("isGrafanaAdmin"))
+            or bool(detail.get("isAdmin"))
+            or bool(detail.get("isExternal"))
+            or bool(detail.get("authLabels"))
+            or bool(member.get("authLabels"))
+        )
+        if not is_verified_msp:
+            continue
+
+        org1_role = str(member.get("role") or "").strip()
+        if (
+            org1_role == "Admin"
+            or login_lower == admin_login_lower
+            or bool(detail.get("isGrafanaAdmin"))
+            or bool(detail.get("isAdmin"))
+        ):
+            desired_role = "Admin"
+        else:
+            desired_role = "Viewer"
+
+        seen_uids.add(uid)
+        msp_staff.append((uid, login, desired_role))
+
+    if not msp_staff:
+        return
+
+    for oid in active_customer_org_ids:
+        if oid <= 1:
+            continue
+        ou_st, existing_ou = client.request(
+            "GET", f"/api/orgs/{oid}/users", org_id=oid, allow_404=True
+        )
+        existing_roles: dict[int, str] = {}
+        if ou_st == 200 and isinstance(existing_ou, list):
+            for item in existing_ou:
+                if isinstance(item, dict) and "userId" in item:
+                    existing_roles[int(item["userId"])] = str(item.get("role") or "")
+
+        for uid, login, desired_role in msp_staff:
+            if uid not in existing_roles:
+                client.request(
+                    "POST",
+                    f"/api/orgs/{oid}/users",
+                    {"loginOrEmail": login, "role": desired_role},
+                    org_id=oid,
+                )
+            elif existing_roles[uid] != desired_role:
+                client.request(
+                    "PATCH",
+                    f"/api/orgs/{oid}/users/{uid}",
+                    {"role": desired_role},
+                    org_id=oid,
+                )
+
+
 def sync_all_orgs(
     state_dir: str | Path,
     env: Mapping[str, str] | None = None,
@@ -668,9 +785,11 @@ def sync_all_orgs(
         _evict_removed_portal_users(client, sdir, tenant, globally_active_lower)
 
     synced_customer_orgs = 0
+    active_customer_org_ids: list[int] = []
     for tenant in tenants:
         if bool(tenant.get("customer_portal_enabled", False)):
             oid = _ensure_customer_org(client, sdir, tenant)
+            active_customer_org_ids.append(oid)
             customer = tenant["customer"]
             _upsert_datasource(
                 client,
@@ -714,6 +833,7 @@ def sync_all_orgs(
                     {"dashboard": locked_model, "overwrite": True},
                     org_id=oid,
                 )
+            _set_org_home_dashboard(client, oid, dashboards)
             _sync_portal_users(
                 client,
                 sdir,
@@ -731,6 +851,12 @@ def sync_all_orgs(
                 int(existing_oid) if isinstance(existing_oid, int) else None,
                 globally_active_lower=globally_active_lower,
             )
+
+    _sync_msp_staff_to_customer_orgs(
+        client,
+        sorted(set(active_customer_org_ids)),
+        globally_active_lower,
+    )
 
     return {"synced": True, "customer_orgs": synced_customer_orgs}
 

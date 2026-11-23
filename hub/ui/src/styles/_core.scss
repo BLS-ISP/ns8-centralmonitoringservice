@@ -326,6 +326,35 @@
   margin-bottom: 0.625rem;
 }
 
+.portal-steps-grid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+@media (min-width: 900px) {
+  .portal-steps-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.portal-step-card {
+  background: #ffffff;
+  border: 1px solid #d0e2ff;
+  padding: 0.625rem 0.75rem;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--cms-text-primary);
+}
+
+.portal-step-card__num {
+  display: inline-block;
+  font-weight: 700;
+  color: var(--cms-accent-primary);
+  margin-right: 0.25rem;
+}
+
 .ldap-test-box {
   background: var(--cms-surface-subtle);
   border: 1px solid var(--cms-border-subtle);

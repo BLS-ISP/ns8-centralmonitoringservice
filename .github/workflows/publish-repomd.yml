@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       version_tag:
-        description: "Optional version tag to advertise in repodata.json / repomd.json (e.g. 1.0.2)"
+        description: "Optional version tag to advertise in repodata.json / repomd.json (e.g. 1.0.3)"
         required: false
         type: string
 
@@ -68,7 +68,7 @@ jobs:
           elif [ "${REF_TYPE}" = "tag" ]; then
             TARGET_TAG="${REF_NAME}"
           else
-            TARGET_TAG="1.0.2"
+            TARGET_TAG="1.0.3"
           fi
 
           python scripts/generate-repomd.py \

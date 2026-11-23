@@ -23,7 +23,7 @@
       </div>
     </div>
 
-    <!-- Customer Portal Login Explanation & Central Login URL Bar -->
+    <!-- Customer Portal Login Explanation & 3-Step MSP Support Guide -->
     <div class="portal-info-bar">
       <div class="portal-info-bar__header">
         <div class="portal-info-bar__title">
@@ -50,6 +50,20 @@
       </div>
       <div class="portal-info-bar__desc">
         {{ $t("tenants.portal_info_desc") }}
+      </div>
+      <div class="portal-steps-grid">
+        <div class="portal-step-card">
+          <span class="portal-step-card__num">1.</span>
+          <span>{{ $t("tenants.portal_step_1") }}</span>
+        </div>
+        <div class="portal-step-card">
+          <span class="portal-step-card__num">2.</span>
+          <span>{{ $t("tenants.portal_step_2") }}</span>
+        </div>
+        <div class="portal-step-card">
+          <span class="portal-step-card__num">3.</span>
+          <span>{{ $t("tenants.portal_step_3") }}</span>
+        </div>
       </div>
       <div v-if="effectiveGrafanaLoginUrl" class="mono-text">
         <strong>{{ $t("tenants.portal_login_url_label") }}:</strong>
@@ -217,6 +231,24 @@
 
             <cv-data-table-cell>
               <div class="table-row-actions">
+                <NsButton
+                  v-if="row.customer_portal_enabled && row.grafana_org_id > 1"
+                  kind="primary"
+                  size="sm"
+                  :icon="View20"
+                  @click="simulateCustomerView(row)"
+                >
+                  {{ $t("tenants.simulate_customer_view_btn") }}
+                </NsButton>
+                <NsButton
+                  v-else
+                  kind="ghost"
+                  size="sm"
+                  :icon="Launch20"
+                  @click="simulateCustomerView(row)"
+                >
+                  {{ $t("tenants.open_filtered_msp_view_btn") }}
+                </NsButton>
                 <NsButton
                   kind="secondary"
                   size="sm"
@@ -414,8 +446,26 @@
           </div>
           <div v-if="portalModalLoginUrl" class="table-row-actions">
             <NsButton
+              v-if="
+                portalModal.customer_portal_enabled &&
+                portalModal.grafana_org_id > 1
+              "
+              kind="primary"
+              size="sm"
+              type="button"
+              :icon="View20"
+              @click="simulateCustomerView(portalModal)"
+            >
+              {{
+                $t("tenants.simulate_customer_view_modal_btn", {
+                  orgId: portalModal.grafana_org_id,
+                })
+              }}
+            </NsButton>
+            <NsButton
               kind="ghost"
               size="sm"
+              type="button"
               :icon="Copy16"
               @click="copySecret(portalModalLoginUrl)"
             >
@@ -424,6 +474,7 @@
             <NsButton
               kind="secondary"
               size="sm"
+              type="button"
               :icon="Launch20"
               @click="openExternalUrl(portalModalLoginUrl)"
             >
@@ -437,13 +488,27 @@
           v-if="!loadingPortalUsers && !portalModal.customer_portal_enabled"
           kind="warning"
           :title="$t('tenants.portal_disabled_warning_title')"
-          :description="$t('tenants.portal_disabled_warning_desc')"
-          :actionLabel="$t('tenants.enable_portal_now_btn')"
-          :loadingAction="enablingPortalInline"
           :showCloseButton="false"
-          @action="enablePortalForCurrentTenant"
           class="mg-bottom-md"
-        />
+        >
+          <template #description>
+            <div>
+              <p class="mg-bottom-sm">
+                {{ $t("tenants.portal_disabled_warning_desc") }}
+              </p>
+              <NsButton
+                kind="primary"
+                size="sm"
+                type="button"
+                :loading="enablingPortalInline"
+                :disabled="enablingPortalInline"
+                @click="enablePortalForCurrentTenant"
+              >
+                {{ $t("tenants.enable_portal_now_btn") }}
+              </NsButton>
+            </div>
+          </template>
+        </NsInlineNotification>
 
         <!-- Newly Set Credentials Copy Banner -->
         <NsInlineNotification
@@ -975,6 +1040,7 @@ import Copy16 from "@carbon/icons-vue/es/copy/16";
 import Download16 from "@carbon/icons-vue/es/download/16";
 import UserMultiple20 from "@carbon/icons-vue/es/user--multiple/20";
 import Launch20 from "@carbon/icons-vue/es/launch/20";
+import View20 from "@carbon/icons-vue/es/view/20";
 import Password16 from "@carbon/icons-vue/es/password/16";
 import Locked16 from "@carbon/icons-vue/es/locked/16";
 import Unlocked16 from "@carbon/icons-vue/es/unlocked/16";
@@ -1003,6 +1069,7 @@ export default {
       Download16,
       UserMultiple20,
       Launch20,
+      View20,
       Password16,
       Locked16,
       Unlocked16,
@@ -1142,6 +1209,35 @@ export default {
     openExternalUrl(url) {
       if (url) {
         window.open(url, "_blank", "noopener,noreferrer");
+      }
+    },
+    resolveGrafanaOrigin(row) {
+      const candidate =
+        (row && row.grafana_login_url) ||
+        this.effectiveGrafanaLoginUrl ||
+        this.grafanaUrl ||
+        "";
+      if (!candidate) {
+        return "";
+      }
+      return candidate.replace(/\/login\/?$/, "").replace(/\/+$/, "");
+    },
+    simulateCustomerView(row) {
+      if (!row || !row.customer) {
+        return;
+      }
+      const origin = this.resolveGrafanaOrigin(row);
+      if (!origin) {
+        return;
+      }
+      if (row.customer_portal_enabled && row.grafana_org_id > 1) {
+        this.openExternalUrl(`${origin}/?orgId=${row.grafana_org_id}`);
+      } else {
+        this.openExternalUrl(
+          `${origin}/d/ns8-multi-cluster-overview?orgId=1&var-customer=${encodeURIComponent(
+            row.customer
+          )}`
+        );
       }
     },
     dismissRevealedToken() {

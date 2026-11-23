@@ -18,6 +18,7 @@ import sqlite3
 import ssl
 import struct
 import sys
+from typing import Any
 import zlib
 
 import aiohttp
@@ -2587,9 +2588,11 @@ async def test_11_v102_live_ad_ldap_discovery_tester_and_multi_user_customer_por
             u["id"] for u in live_backends.grafana.users.values() if u["login"] == "acme.editor"
         )
         assert live_backends.grafana.org_members[acme_oid] == {
+            1: "Admin",
             viewer_uid: "Viewer",
             editor_uid: "Editor",
         }
+        assert set(live_backends.grafana.org_members[1].keys()) == {1}
         assert viewer_uid not in live_backends.grafana.org_members[1]
         assert editor_uid not in live_backends.grafana.org_members[1]
         assert viewer_uid not in live_backends.grafana.org_members[rival_oid]
@@ -2813,6 +2816,319 @@ async def test_11_v102_live_ad_ldap_discovery_tester_and_multi_user_customer_por
         assert upgraded_meta["systemctl_state"]["grafana.service"] == "active"
     finally:
         ldap_srv.stop()
+
+
+def _parse_ldap_group_mappings(ldap_toml_text: str) -> list[dict[str, Any]]:
+    """Extract ordered `[[servers.group_mappings]]` stanzas from rendered `ldap.toml`."""
+    blocks: list[dict[str, Any]] = []
+    parts = ldap_toml_text.split("[[servers.group_mappings]]")
+    for raw_part in parts[1:]:
+        stanza: dict[str, Any] = {}
+        for raw_line in raw_part.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("["):
+                break
+            if "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            k = key.strip()
+            v = val.strip()
+            if len(v) >= 2 and v[0] == '"' and v[-1] == '"':
+                stanza[k] = v[1:-1]
+            elif v in ("true", "false"):
+                stanza[k] = v == "true"
+            elif v.isdigit():
+                stanza[k] = int(v)
+            else:
+                stanza[k] = v
+        blocks.append(stanza)
+    return blocks
+
+
+@pytest.mark.asyncio
+async def test_12_v103_msp_simulated_customer_view_and_home_dashboard(
+    tmp_path: Path, live_backends: LiveObservabilityBackends
+) -> None:
+    """Verify v1.0.3 Org Home Dashboard, 1-way MSP staff Customer Org sync, and multi-org `ldap.toml`."""
+    base_dn = "DC=ad,DC=bls-isp,DC=net"
+    bind_dn = f"CN=ldapsvc,CN=Users,{base_dn}"
+    bind_pw = "AdBlsIspV103Secret!2026"
+
+    da_dn = f"CN=Domain Admins,CN=Users,{base_dn}"
+    genera_grp_dn = f"CN=Genera,OU=MSP,{base_dn}"
+    audit_grp_dn = f"CN=MSP Audit,OU=MSP,{base_dn}"
+
+    ad_entries = [
+        {
+            "dn": da_dn,
+            "attrs": {
+                "objectClass": ["top", "group"],
+                "cn": "Domain Admins",
+                "sAMAccountName": "Domain Admins",
+                "description": "MSP Superadmins",
+                "primaryGroupToken": "512",
+                "member": [],
+            },
+        },
+        {
+            "dn": genera_grp_dn,
+            "attrs": {
+                "objectClass": ["top", "group"],
+                "cn": "Genera",
+                "sAMAccountName": "Genera",
+                "description": "MSP Support Engineers (Org 1 Editor, Customer Org Viewer)",
+                "member": [],
+            },
+        },
+        {
+            "dn": audit_grp_dn,
+            "attrs": {
+                "objectClass": ["top", "group"],
+                "cn": "MSP Audit",
+                "sAMAccountName": "MSP-Audit",
+                "description": "MSP ReadOnly Auditors",
+                "member": [],
+            },
+        },
+    ]
+
+    ldap_srv = LiveBERLDAPv3Server(
+        expected_bind_dn=bind_dn,
+        expected_bind_pw=bind_pw,
+        entries=ad_entries,
+        max_page_size=2,
+        emit_referral=False,
+    )
+    ldap_srv.start()
+    try:
+        hub = NS8ModuleInstance(
+            kind="hub",
+            install_dir=tmp_path / "hub_v103_home",
+            module_id="central-monitoring-hub1",
+            tcp_port=20080,
+            backends=live_backends,
+        )
+        hub.set_ldap_domain(
+            "ad.bls-isp.net",
+            {
+                "host": "127.0.0.1",
+                "port": str(ldap_srv.port),
+                "schema": "ad",
+                "base_dn": base_dn,
+                "bind_dn": bind_dn,
+                "bind_password": bind_pw,
+                "tls": False,
+            },
+        )
+
+        # Simulate existing Grafana Org 1 users:
+        # - `msp.admin` (`Domain Admins` via LDAP, `isExternal=True`, Org 1 `Admin`)
+        # - `msp.support` (`Genera` via LDAP, `isExternal=True`, Org 1 `Editor`)
+        # - `stray.local` (non-external unprivileged local account — MUST NOT propagate!)
+        gf = live_backends.grafana
+        msp_admin_uid = gf.add_org1_user(
+            login="msp.admin",
+            email="admin@bls-isp.net",
+            org1_role="Admin",
+            is_external=True,
+            is_grafana_admin=True,
+        )
+        msp_support_uid = gf.add_org1_user(
+            login="msp.support",
+            email="support@bls-isp.net",
+            org1_role="Editor",
+            is_external=True,
+            is_grafana_admin=False,
+        )
+        stray_local_uid = gf.add_org1_user(
+            login="stray.local",
+            email="stray@local.invalid",
+            org1_role="Viewer",
+            is_external=False,
+            is_grafana_admin=False,
+            auth_labels=[],
+        )
+
+        await hub.run_script("actions/create-module/20initialize")
+        cfg_req = {
+            "host": "monitoring.bls-isp.net",
+            "lets_encrypt": True,
+            "http2https": True,
+            "storage_mode": "local",
+            "ldap_enabled": True,
+            "ldap_domain": "ad.bls-isp.net",
+            "ldap_admin_group": "Domain Admins",
+            "ldap_editor_group": "Genera",
+            "ldap_viewer_group": "MSP Audit",
+            "grafana_admin_password": "MspV103AdminPassword!",
+        }
+        await hub.run_script("actions/configure-module/01hostname-validation", cfg_req)
+        await hub.run_script("actions/configure-module/20configure", cfg_req)
+
+        # 1. Verify Org 1 Home Dashboard provisioned immediately on `configure-module`
+        assert gf.org_preferences[1].get("homeDashboardUID") == "ns8-multi-cluster-overview"
+
+        # 2. Provision two portal-enabled Customer Orgs (`acme-gmbh` & `globex-gmbh`) + portal users
+        _, _, _, acme_saved = await hub.run_script(
+            "actions/save-tenant/20save",
+            {
+                "customer": "acme-gmbh",
+                "display_name": "Acme GmbH",
+                "sites": ["hq"],
+                "contact_emails": ["it@acme.de"],
+                "customer_portal_enabled": True,
+            },
+        )
+        acme_oid = int(acme_saved["grafana_org_id"])
+        assert acme_oid > 1
+
+        _, _, _, globex_saved = await hub.run_script(
+            "actions/save-tenant/20save",
+            {
+                "customer": "globex-gmbh",
+                "display_name": "Globex GmbH",
+                "sites": ["berlin"],
+                "contact_emails": ["ops@globex.de"],
+                "customer_portal_enabled": True,
+            },
+        )
+        globex_oid = int(globex_saved["grafana_org_id"])
+        assert globex_oid > 1 and globex_oid != acme_oid
+
+        await hub.run_script(
+            "actions/save-portal-user/20save",
+            {
+                "customer": "acme-gmbh",
+                "username": "acme.viewer",
+                "role": "Viewer",
+                "password": "AcmePortalViewer!2026",
+            },
+        )
+        await hub.run_script(
+            "actions/save-portal-user/20save",
+            {
+                "customer": "acme-gmbh",
+                "username": "acme.editor",
+                "role": "Editor",
+                "password": "AcmePortalEditor!2026",
+            },
+        )
+        await hub.run_script(
+            "actions/save-portal-user/20save",
+            {
+                "customer": "globex-gmbh",
+                "username": "globex.viewer",
+                "role": "Viewer",
+                "password": "GlobexPortalViewer!2026",
+            },
+        )
+
+        acme_v_uid = next(u["id"] for u in gf.users.values() if u["login"] == "acme.viewer")
+        acme_e_uid = next(u["id"] for u in gf.users.values() if u["login"] == "acme.editor")
+        globex_v_uid = next(u["id"] for u in gf.users.values() if u["login"] == "globex.viewer")
+
+        # 3. Verify `homeDashboardUID == "ns8-multi-cluster-overview"` on Org 1 and BOTH Customer Orgs
+        assert gf.org_preferences[1].get("homeDashboardUID") == "ns8-multi-cluster-overview"
+        assert gf.org_preferences[acme_oid].get("homeDashboardUID") == "ns8-multi-cluster-overview"
+        assert gf.org_preferences[globex_oid].get("homeDashboardUID") == "ns8-multi-cluster-overview"
+
+        # 4. Verify 1-way MSP staff propagation (`Domain Admins -> Admin`, `Genera -> Viewer`)
+        #    and strict non-propagation of stray local users & customer portal users!
+        assert gf.org_members[acme_oid] == {
+            1: "Admin",
+            msp_admin_uid: "Admin",
+            msp_support_uid: "Viewer",
+            acme_v_uid: "Viewer",
+            acme_e_uid: "Editor",
+        }
+        assert gf.org_members[globex_oid] == {
+            1: "Admin",
+            msp_admin_uid: "Admin",
+            msp_support_uid: "Viewer",
+            globex_v_uid: "Viewer",
+        }
+        assert stray_local_uid not in gf.org_members[acme_oid]
+        assert stray_local_uid not in gf.org_members[globex_oid]
+
+        for portal_uid in (acme_v_uid, acme_e_uid, globex_v_uid):
+            assert portal_uid not in gf.org_members[1]
+        assert acme_v_uid not in gf.org_members[globex_oid]
+        assert acme_e_uid not in gf.org_members[globex_oid]
+        assert globex_v_uid not in gf.org_members[acme_oid]
+
+        # MSP staff active default Org (`orgId`) MUST stay `1` (never switched via `/using/<oid>`)!
+        msp_uids = {1, msp_admin_uid, msp_support_uid}
+        for staff_uid in msp_uids:
+            assert gf.users[staff_uid]["orgId"] == 1
+        assert all(switched_uid not in msp_uids for switched_uid, _ in gf.org_switch_calls)
+        assert gf.users[acme_v_uid]["orgId"] == acme_oid
+        assert gf.users[globex_v_uid]["orgId"] == globex_oid
+
+        # 5. Verify `ldap.toml` multi-org mappings: `org_id = 1` blocks FIRST, followed by sorted
+        #    active Customer Orgs (`Admin` for `Domain Admins` without `grafana_admin`, `Viewer` for `Genera`)!
+        ldap_toml_both = (hub.config_dir / "grafana" / "ldap.toml").read_text(encoding="utf-8")
+        mappings_both = _parse_ldap_group_mappings(ldap_toml_both)
+        expected_c_oids = sorted([acme_oid, globex_oid])
+        assert [m["org_id"] for m in mappings_both] == [
+            1,
+            1,
+            1,
+            expected_c_oids[0],
+            expected_c_oids[0],
+            expected_c_oids[0],
+            expected_c_oids[1],
+            expected_c_oids[1],
+            expected_c_oids[1],
+        ]
+        assert mappings_both[:3] == [
+            {"group_dn": da_dn, "org_role": "Admin", "grafana_admin": True, "org_id": 1},
+            {"group_dn": genera_grp_dn, "org_role": "Editor", "org_id": 1},
+            {"group_dn": audit_grp_dn, "org_role": "Viewer", "org_id": 1},
+        ]
+        for idx, c_oid in enumerate(expected_c_oids):
+            offset = 3 + idx * 3
+            assert mappings_both[offset : offset + 3] == [
+                {"group_dn": da_dn, "org_role": "Admin", "org_id": c_oid},
+                {"group_dn": genera_grp_dn, "org_role": "Viewer", "org_id": c_oid},
+                {"group_dn": audit_grp_dn, "org_role": "Viewer", "org_id": c_oid},
+            ]
+
+        # 6. Disabling portal on `globex-gmbh` removes `org_id = <globex_oid>` from `ldap.toml`
+        await hub.run_script(
+            "actions/save-tenant/20save",
+            {
+                "customer": "globex-gmbh",
+                "display_name": "Globex GmbH",
+                "sites": ["berlin"],
+                "contact_emails": ["ops@globex.de"],
+                "customer_portal_enabled": False,
+            },
+        )
+        mappings_after_disable = _parse_ldap_group_mappings(
+            (hub.config_dir / "grafana" / "ldap.toml").read_text(encoding="utf-8")
+        )
+        assert [m["org_id"] for m in mappings_after_disable] == [
+            1,
+            1,
+            1,
+            acme_oid,
+            acme_oid,
+            acme_oid,
+        ]
+        assert globex_v_uid not in gf.org_members[1]
+        assert globex_v_uid not in gf.org_members[acme_oid]
+
+        # 7. Deleting `acme-gmbh` removes `org_id = <acme_oid>` from `ldap.toml`, leaving ONLY `org_id = 1`
+        await hub.run_script("actions/delete-tenant/20delete", {"customer": "acme-gmbh"})
+        mappings_after_delete = _parse_ldap_group_mappings(
+            (hub.config_dir / "grafana" / "ldap.toml").read_text(encoding="utf-8")
+        )
+        assert [m["org_id"] for m in mappings_after_delete] == [1, 1, 1]
+    finally:
+        ldap_srv.stop()
+
 
 
 

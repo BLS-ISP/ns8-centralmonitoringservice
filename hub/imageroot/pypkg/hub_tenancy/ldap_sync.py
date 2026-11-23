@@ -13,6 +13,7 @@ from hub_tenancy.ldap_client import (
     discover_domain_groups_raw,
     resolve_group_dn,
 )
+from hub_tenancy.store import load_tenants_raw
 
 
 def _toml_escape(value: str) -> str:
@@ -208,31 +209,50 @@ def sync_ldap_config(
         ]
     )
 
-    if admin_group:
-        group_dn = resolve_group_dn(
+    admin_dn = (
+        resolve_group_dn(
             admin_group,
             base_dn=base_dn,
             schema=schema,
             discovered_groups=discovered_groups,
         )
+        if admin_group
+        else ""
+    )
+    ed_dn = (
+        resolve_group_dn(
+            editor_group,
+            base_dn=base_dn,
+            schema=schema,
+            discovered_groups=discovered_groups,
+        )
+        if editor_group
+        else ""
+    )
+    vw_dn = (
+        resolve_group_dn(
+            viewer_group,
+            base_dn=base_dn,
+            schema=schema,
+            discovered_groups=discovered_groups,
+        )
+        if viewer_group
+        else ""
+    )
+
+    if admin_dn:
         lines.extend(
             [
                 "",
                 "[[servers.group_mappings]]",
-                f"group_dn = {_toml_escape(group_dn)}",
+                f"group_dn = {_toml_escape(admin_dn)}",
                 'org_role = "Admin"',
                 "grafana_admin = true",
                 "org_id = 1",
             ]
         )
 
-    if editor_group:
-        ed_dn = resolve_group_dn(
-            editor_group,
-            base_dn=base_dn,
-            schema=schema,
-            discovered_groups=discovered_groups,
-        )
+    if ed_dn:
         lines.extend(
             [
                 "",
@@ -243,13 +263,7 @@ def sync_ldap_config(
             ]
         )
 
-    if viewer_group:
-        vw_dn = resolve_group_dn(
-            viewer_group,
-            base_dn=base_dn,
-            schema=schema,
-            discovered_groups=discovered_groups,
-        )
+    if vw_dn:
         lines.extend(
             [
                 "",
@@ -259,6 +273,49 @@ def sync_ldap_config(
                 "org_id = 1",
             ]
         )
+
+    tenants = load_tenants_raw(sdir)
+    customer_org_ids = sorted(
+        {
+            int(t["grafana_org_id"])
+            for t in tenants
+            if bool(t.get("customer_portal_enabled"))
+            and isinstance(t.get("grafana_org_id"), int)
+            and int(t["grafana_org_id"]) > 1
+        }
+    )
+
+    for c_oid in customer_org_ids:
+        if admin_dn:
+            lines.extend(
+                [
+                    "",
+                    "[[servers.group_mappings]]",
+                    f"group_dn = {_toml_escape(admin_dn)}",
+                    'org_role = "Admin"',
+                    f"org_id = {c_oid}",
+                ]
+            )
+        if ed_dn:
+            lines.extend(
+                [
+                    "",
+                    "[[servers.group_mappings]]",
+                    f"group_dn = {_toml_escape(ed_dn)}",
+                    'org_role = "Viewer"',
+                    f"org_id = {c_oid}",
+                ]
+            )
+        if vw_dn:
+            lines.extend(
+                [
+                    "",
+                    "[[servers.group_mappings]]",
+                    f"group_dn = {_toml_escape(vw_dn)}",
+                    'org_role = "Viewer"',
+                    f"org_id = {c_oid}",
+                ]
+            )
 
     lines.append("")
     _atomic_write_toml(toml_path, "\n".join(lines))

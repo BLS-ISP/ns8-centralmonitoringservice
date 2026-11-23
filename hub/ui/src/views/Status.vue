@@ -511,7 +511,11 @@ export default {
     },
     openGrafana() {
       if (this.overview.grafana_url) {
-        window.open(this.overview.grafana_url, "_blank", "noopener,noreferrer");
+        const clean = this.overview.grafana_url.replace(/\/+$/, "");
+        const targetUrl = clean.includes("orgId=")
+          ? clean
+          : `${clean}${clean.includes("?") ? "&" : "/?"}orgId=1`;
+        window.open(targetUrl, "_blank", "noopener,noreferrer");
       }
     },
     async copyText(value) {

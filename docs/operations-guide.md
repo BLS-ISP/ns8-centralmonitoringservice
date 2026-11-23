@@ -83,7 +83,7 @@ Damit sich Techniker des Systemhauses mit ihrem zentralen NethServer-8-Benutzerk
    - **Live-Benutzertest (`test-ldap-user`):** Prüfen Sie vor dem Speichern mit einem AD-/LDAP-Benutzernamen die effektive Gruppenauflösung (inkl. verschachtelter Active-Directory-Gruppen über `LDAP_MATCHING_RULE_IN_CHAIN` `1.2.840.113556.1.4.1941` sowie primärer AD-Gruppe) und die resultierende Grafana-Rolle.
 
 > [!NOTE]
-> LDAP-Gruppen-Mappings werden in `/etc/grafana/ldap.toml` hart auf `org_id = 1` (MSP Main Org) gebunden. Wenn sich NS8-LDAP-Proxy-Ports ändern, aktualisiert der Event-Handler `events/user-domain-changed/10handler` die Konfiguration automatisch. Optionale Endkunden-Zugänge nutzen davon strikt getrennte lokale Konten in ihrer jeweiligen Kunden-Organisation.
+> LDAP-Gruppen-Mappings werden in `/etc/grafana/ldap.toml` primär auf `org_id = 1` (MSP Main Org) gebunden und automatisch einseitig (`1-Way`) auf alle aktiven Kundenportal-Organisationen (`org_id > 1`) erweitert: MSP-Admins erhalten dort `Admin`, während MSP-Techniker/Support (`Editor`/`Viewer`) gezielt als Read-Only-`Viewer` synchronisiert werden, damit Support-Mitarbeiter die exakte Kundensicht ohne versehentliche Änderungen prüfen können. Wenn sich NS8-LDAP-Proxy-Ports oder aktive Kundenportale ändern, aktualisiert der Hub `ldap.toml` automatisch. Optionale Endkunden-Zugänge bleiben davon strikt getrennt und existieren ausschließlich lokal in ihrer jeweiligen Kunden-Organisation.
 
 ---
 
@@ -114,7 +114,9 @@ flowchart TD
    - **Anzeigename (`display_name`):** `Autohaus Schmidt GmbH`
    - **Standorte (`sites`):** z. B. `hq`, `filiale-sued` (Standard-Standort: `hq`)
    - **Kunden-Kontaktadressen (`contact_emails`, optional):** z. B. `it@autohaus-schmidt.de` für mandantenbezogene E-Mail-Alarme
-   - **Kundenportal & Multi-User-Konten (`customer_portal_enabled`, optional):** Bei Bedarf aktivieren. Über die Aktion **Portal-Benutzer verwalten** (`list-portal-users`, `save-portal-user`, `delete-portal-user`) in der Mandantenliste können beliebig viele kundeneigene Grafana-Konten mit Rolle `Viewer` (reiner Lesezugriff) oder `Editor` (eigene Dashboards innerhalb der isolierten Kunden-Org bearbeiten, während Datenquellen, Provisioning und Alerting serverseitig durch `hub-gateway` gesperrt bleiben) angelegt, per Passwort-Generator zurückgesetzt, vorübergehend gesperrt/aktiviert (`disabled`) und per 1-Klick-Zugangsdaten-Kopie geteilt werden.
+   - **Kundenportal, Multi-User-Konten & 1-Klick-MSP-Kundensicht (`customer_portal_enabled`, optional):** Bei Bedarf direkt beim Mandanten oder inline im Dialog **Kunden-Zugänge (Portal-Benutzer)** aktivieren:
+     - **Kunden-Login (`https://<hub-fqdn>/login`):** Beliebig viele kundeneigene Grafana-Konten (`Viewer` für Lesezugriff oder `Editor` für eigene Dashboards innerhalb der isolierten Kunden-Org bei serverseitig gesperrten Datenquellen/Alerting/Provisioning) anlegen, per Passwort-Generator zurücksetzen, sperren/entsperren (`disabled`) und per 1-Klick kopieren. Nach dem Login landet jeder Benutzer automatisch auf dem gesetzten Org-Home-Dashboard **`NS8 Multi-Cluster & MSP Fleet Overview`**.
+     - **1-Klick Simulierte Kundensicht für MSP-Techniker:** Über die Schaltfläche **Kundensicht öffnen** in der Mandantenliste springen angemeldete MSP-Mitarbeiter bei aktivem Kundenportal direkt in die isolierte Kunden-Org (`/?orgId=<grafana_org_id>`, MSP-Admins als `Admin`, Techniker/Support als Read-Only-`Viewer`) bzw. bei deaktiviertem Kundenportal direkt auf das mandantengefilterte Fleet-Dashboard (`/d/ns8-multi-cluster-overview?orgId=1&var-customer=<slug>`). Über **Grafana öffnen** im Status-/Einstellungs-Tab (`/?orgId=1`) kehren MSP-Techniker jederzeit mit einem Klick in die globale MSP-Ansicht zurück.
 2. Kopieren Sie das nach dem Speichern **einmalig eingeblendete Bearer-Token (`cms_v1_...`)** direkt in Ihren Passwort-Tresor.
 
 ### 4.2 Variante A: Kundenstandort MIT eigenem NethServer 8
