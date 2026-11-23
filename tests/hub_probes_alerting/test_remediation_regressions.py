@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 import pytest
@@ -447,8 +448,9 @@ def test_python39_strict_syntax_and_runtime_compatibility() -> None:
                 if (node.value.id, node.attr) in forbidden_py310_attrs:
                     violations.append(f"{fpath}:{node.lineno}: Python 3.10+ {node.value.id}.{node.attr}")
 
-            # 4. No PEP 701 (Python 3.12+) f-string constructs
-            if isinstance(node, ast.JoinedStr):
+            # 4. No PEP 701 (Python 3.12+) f-string constructs (on Python < 3.12, ast.parse already rejects PEP 701 natively
+            #    and FormattedValue shares the outer JoinedStr source span rather than the {...} slice)
+            if sys.version_info >= (3, 12) and isinstance(node, ast.JoinedStr):
                 jseg = ast.get_source_segment(src, node) or ""
                 stripped = jseg.lstrip("fFrR")
                 is_triple = stripped.startswith(('"""', "'''"))

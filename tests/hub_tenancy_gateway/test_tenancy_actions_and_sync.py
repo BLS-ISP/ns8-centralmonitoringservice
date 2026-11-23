@@ -623,7 +623,8 @@ class TestStaticHygieneAndLFCompliance:
             assert has_future, f"Missing 'from __future__ import annotations' in {p}"
 
             for node in ast.walk(tree):
-                assert not isinstance(node, ast.Match), f"Python 3.10+ match/case in {p}:{node.lineno}"
+                if hasattr(ast, "Match"):
+                    assert not isinstance(node, ast.Match), f"Python 3.10+ match/case in {p}:{node.lineno}"
                 if isinstance(node, ast.Call):
                     if isinstance(node.func, ast.Attribute) and node.func.attr == "write_text":
                         for kw in node.keywords:
@@ -651,7 +652,7 @@ class TestStaticHygieneAndLFCompliance:
                         isinstance(node.value, ast.Name) and node.value.id in ("ast", "os")
                     ):
                         raise AssertionError(f"Python 3.12+ Path.walk in {p}:{node.lineno}")
-                if isinstance(node, ast.JoinedStr):
+                if sys.version_info >= (3, 12) and isinstance(node, ast.JoinedStr):
                     seg = ast.get_source_segment(src, node) or ""
                     stripped = seg.lstrip("rRfF")
                     is_triple = stripped.startswith('"""') or stripped.startswith("'''")
