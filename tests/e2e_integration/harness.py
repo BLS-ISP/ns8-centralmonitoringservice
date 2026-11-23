@@ -1449,6 +1449,15 @@ class LiveBERLDAPv3Server:
             return ("eq", attr_b.decode("utf-8"), val_b.decode("utf-8", errors="replace")), next_pos
         if tag == 0x87:
             return ("present", body.decode("utf-8")), next_pos
+        if tag == 0xA4:
+            _, attr_b, pos = _decode_ber_tlv(body, 0)
+            _, seq_b, _ = _decode_ber_tlv(body, pos)
+            parts = []
+            sp = 0
+            while sp < len(seq_b):
+                st, sb, sp = _decode_ber_tlv(seq_b, sp)
+                parts.append((st, sb.decode("utf-8", errors="replace")))
+            return ("substr", attr_b.decode("utf-8"), parts), next_pos
         if tag == 0xA9:
             rule = ""
             attr = ""
@@ -1538,7 +1547,10 @@ class LiveBERLDAPv3Server:
 
     def _encode_entry_msg(self, msg_id: int, entry: dict[str, Any]) -> bytes:
         part_attrs: list[bytes] = []
-        for k, raw_v in entry.get("attrs", {}).items():
+        raw_attrs = dict(entry.get("attrs", {}))
+        if not any(k.lower() == "distinguishedname" for k in raw_attrs):
+            raw_attrs["distinguishedName"] = entry["dn"]
+        for k, raw_v in raw_attrs.items():
             vals = raw_v if isinstance(raw_v, list) else [raw_v]
             enc_vals = [
                 _ber_octet_string(v if isinstance(v, bytes) else str(v).encode("utf-8"))

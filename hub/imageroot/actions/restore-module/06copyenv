@@ -5,6 +5,16 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
+
+_PYPKG = Path(__file__).resolve().parents[2] / "pypkg"
+if str(_PYPKG) not in sys.path:
+    sys.path.insert(0, str(_PYPKG))
+
+from hub_core.env_store import (  # noqa: E402
+    decode_ldap_principals,
+    encode_ldap_principals,
+)
 
 PRESERVED_INSTANCE_KEYS = frozenset(
     {
@@ -24,12 +34,27 @@ def main() -> int:
     import agent
 
     request = json.load(sys.stdin)
-    original_env = request.get("environment") or {}
+    original_env = request.get("environment")
     if isinstance(original_env, dict):
-        for key, value in original_env.items():
+        str_env = {str(k): str(v) for k, v in original_env.items()}
+        for key, value in str_env.items():
             if key in PRESERVED_INSTANCE_KEYS or key.endswith("_IMAGE"):
                 continue
-            agent.set_env(str(key), str(value))
+            agent.set_env(key, value)
+
+        for b64_key, legacy_key, fallback in (
+            ("LDAP_ADMIN_PRINCIPALS_B64", "LDAP_ADMIN_GROUP", ["Domain Admins"]),
+            ("LDAP_EDITOR_PRINCIPALS_B64", "LDAP_EDITOR_GROUP", []),
+            ("LDAP_VIEWER_PRINCIPALS_B64", "LDAP_VIEWER_GROUP", []),
+        ):
+            if not str_env.get(b64_key):
+                resolved = decode_ldap_principals(
+                    str_env,
+                    b64_key,
+                    legacy_key,
+                    default_fallback=fallback,
+                )
+                agent.set_env(b64_key, encode_ldap_principals(resolved))
 
     # NS8 Rule #2: Flush environment to disk immediately!
     agent.dump_env()

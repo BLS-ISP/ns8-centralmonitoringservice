@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import os
 import secrets as py_secrets
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from hub_core import (
     atomic_write_text,
@@ -21,6 +24,55 @@ _FORBIDDEN_SECRET_CHARS = ("\r", "\n", "\x00", "\u2028", "\u2029")
 def _validate_secret_value(key: str, val: str) -> None:
     if any(ch in val for ch in _FORBIDDEN_SECRET_CHARS):
         raise ValueError(f"Secret {key!r} must not contain control or line-separator characters")
+
+
+def normalize_ldap_principals(items: Sequence[str] | list[str] | tuple[str, ...]) -> list[str]:
+    """Clean, filter empty, and case-insensitively deduplicate LDAP group/user principals."""
+    cleaned: list[str] = []
+    seen_lower: set[str] = set()
+    for raw_item in items:
+        sanitized = "".join(ch for ch in str(raw_item) if ch not in _FORBIDDEN_SECRET_CHARS).strip()
+        if not sanitized:
+            continue
+        lowered = sanitized.lower()
+        if lowered in seen_lower:
+            continue
+        seen_lower.add(lowered)
+        cleaned.append(sanitized)
+    return cleaned
+
+
+def encode_ldap_principals(items: list[str] | tuple[str, ...]) -> str:
+    """Encode LDAP principals as pure URL-safe Base64 ASCII JSON for systemd EnvironmentFile."""
+    cleaned = normalize_ldap_principals(items)
+    payload = json.dumps(cleaned, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii")
+
+
+def decode_ldap_principals(
+    env: Mapping[str, str],
+    b64_key: str,
+    legacy_key: str,
+    *,
+    default_fallback: list[str] | None = None,
+) -> list[str]:
+    """Decode URL-safe Base64 LDAP principals with backward-compatible legacy string fallback."""
+    raw_b64 = str(env.get(b64_key, "")).strip() if b64_key in env else ""
+    if raw_b64:
+        padded = raw_b64 + ("=" * (-len(raw_b64) % 4))
+        try:
+            decoded_bytes = base64.urlsafe_b64decode(padded.encode("ascii"))
+            parsed = json.loads(decoded_bytes.decode("utf-8"))
+            if isinstance(parsed, list):
+                return normalize_ldap_principals([str(item) for item in parsed])
+        except (ValueError, UnicodeDecodeError, binascii.Error):
+            pass
+
+    if legacy_key in env:
+        legacy_val = str(env.get(legacy_key, "")).strip()
+        return normalize_ldap_principals([legacy_val]) if legacy_val else []
+
+    return normalize_ldap_principals(list(default_fallback or []))
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -169,6 +221,25 @@ def initialize_default_env(state_dir: str | Path | None = None) -> dict[str, str
     ensure_initial_secrets(state_dir)
     existing = read_module_env(state_dir)
 
+    admin_init = decode_ldap_principals(
+        existing,
+        "LDAP_ADMIN_PRINCIPALS_B64",
+        "LDAP_ADMIN_GROUP",
+        default_fallback=["Domain Admins"],
+    )
+    editor_init = decode_ldap_principals(
+        existing,
+        "LDAP_EDITOR_PRINCIPALS_B64",
+        "LDAP_EDITOR_GROUP",
+        default_fallback=[],
+    )
+    viewer_init = decode_ldap_principals(
+        existing,
+        "LDAP_VIEWER_PRINCIPALS_B64",
+        "LDAP_VIEWER_GROUP",
+        default_fallback=[],
+    )
+
     defaults = {
         "CONFIGURED": "false",
         "TRAEFIK_HOST": "",
@@ -189,9 +260,12 @@ def initialize_default_env(state_dir: str | Path | None = None) -> dict[str, str
         "S3_PATH_STYLE": "true",
         "LDAP_ENABLED": "false",
         "LDAP_DOMAIN": "",
-        "LDAP_ADMIN_GROUP": "Domain Admins",
-        "LDAP_EDITOR_GROUP": "",
-        "LDAP_VIEWER_GROUP": "",
+        "LDAP_ADMIN_GROUP": admin_init[0] if admin_init else "Domain Admins",
+        "LDAP_EDITOR_GROUP": editor_init[0] if editor_init else "",
+        "LDAP_VIEWER_GROUP": viewer_init[0] if viewer_init else "",
+        "LDAP_ADMIN_PRINCIPALS_B64": encode_ldap_principals(admin_init),
+        "LDAP_EDITOR_PRINCIPALS_B64": encode_ldap_principals(editor_init),
+        "LDAP_VIEWER_PRINCIPALS_B64": encode_ldap_principals(viewer_init),
     }
     for img_key, img_val in resolve_pinned_images(state_dir).items():
         if not existing.get(img_key):
@@ -272,9 +346,28 @@ def apply_configuration(state_dir: str | Path | None, request: dict[str, Any]) -
 
     ldap_enabled = bool(request.get("ldap_enabled", False))
     ldap_domain = str(request.get("ldap_domain", "")).strip()
-    ldap_admin_group = str(request.get("ldap_admin_group", "Domain Admins")).strip()
-    ldap_editor_group = str(request.get("ldap_editor_group", "")).strip()
-    ldap_viewer_group = str(request.get("ldap_viewer_group", "")).strip()
+
+    if "ldap_admin_principals" in request and isinstance(request["ldap_admin_principals"], list):
+        admin_principals = normalize_ldap_principals([str(x) for x in request["ldap_admin_principals"]])
+    else:
+        raw_admin_grp = str(request.get("ldap_admin_group", "Domain Admins")).strip()
+        admin_principals = normalize_ldap_principals([raw_admin_grp]) if raw_admin_grp else []
+
+    if "ldap_editor_principals" in request and isinstance(request["ldap_editor_principals"], list):
+        editor_principals = normalize_ldap_principals([str(x) for x in request["ldap_editor_principals"]])
+    else:
+        raw_editor_grp = str(request.get("ldap_editor_group", "")).strip()
+        editor_principals = normalize_ldap_principals([raw_editor_grp]) if raw_editor_grp else []
+
+    if "ldap_viewer_principals" in request and isinstance(request["ldap_viewer_principals"], list):
+        viewer_principals = normalize_ldap_principals([str(x) for x in request["ldap_viewer_principals"]])
+    else:
+        raw_viewer_grp = str(request.get("ldap_viewer_group", "")).strip()
+        viewer_principals = normalize_ldap_principals([raw_viewer_grp]) if raw_viewer_grp else []
+
+    ldap_admin_group = admin_principals[0] if admin_principals else ""
+    ldap_editor_group = editor_principals[0] if editor_principals else ""
+    ldap_viewer_group = viewer_principals[0] if viewer_principals else ""
 
     promql_upstream = "http://127.0.0.1:10902" if storage_mode == "s3" else "http://127.0.0.1:9090"
     prom_extra_args = build_prometheus_extra_args(storage_mode, retention_size_gb)
@@ -302,6 +395,9 @@ def apply_configuration(state_dir: str | Path | None, request: dict[str, Any]) -
         "LDAP_ADMIN_GROUP": ldap_admin_group,
         "LDAP_EDITOR_GROUP": ldap_editor_group,
         "LDAP_VIEWER_GROUP": ldap_viewer_group,
+        "LDAP_ADMIN_PRINCIPALS_B64": encode_ldap_principals(admin_principals),
+        "LDAP_EDITOR_PRINCIPALS_B64": encode_ldap_principals(editor_principals),
+        "LDAP_VIEWER_PRINCIPALS_B64": encode_ldap_principals(viewer_principals),
     }
     existing = read_module_env(sdir)
     for img_key, img_val in resolve_pinned_images(state_dir).items():

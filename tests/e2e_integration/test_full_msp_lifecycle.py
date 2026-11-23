@@ -2446,8 +2446,12 @@ async def test_11_v102_live_ad_ldap_discovery_tester_and_multi_user_customer_por
         assert f'group_dn = "{ro_dn}"' in ldap_toml
         assert 'org_role = "Viewer"' in ldap_toml
         assert "grafana_admin = true" in ldap_toml
-        assert 'group_search_filter = "(&(objectClass=group)(member:1.2.840.113556.1.4.1941:=%s))"' in ldap_toml
+        assert (
+            'group_search_filter = "(|(&(objectClass=group)(member:1.2.840.113556.1.4.1941:=%s))'
+            '(&(objectClass=user)(distinguishedName=%s)))"' in ldap_toml
+        )
         assert 'group_search_filter_user_attribute = "distinguishedName"' in ldap_toml
+        assert 'member_of = "distinguishedName"' in ldap_toml
         assert 'group_dn = "*"' not in ldap_toml
 
         grafana_ini = (hub.config_dir / "grafana" / "grafana.ini").read_text(encoding="utf-8")
@@ -3128,6 +3132,372 @@ async def test_12_v103_msp_simulated_customer_view_and_home_dashboard(
         assert [m["org_id"] for m in mappings_after_delete] == [1, 1, 1]
     finally:
         ldap_srv.stop()
+
+
+@pytest.mark.asyncio
+async def test_13_v104_multi_select_ldap_group_and_user_discovery(
+    tmp_path: Path, live_backends: LiveObservabilityBackends
+) -> None:
+    """Verify v1.0.4 AD group+user discovery, computer/`krbtgt` filtering, multi-principal `ldap.toml`, and upgrade backfill."""
+    base_dn = "DC=ad,DC=bls-isp,DC=net"
+    bind_dn = f"CN=ldapsvc,CN=Users,{base_dn}"
+    bind_pw = "AdBlsIspV104Secret!2026"
+
+    da_dn = f"CN=Domain Admins,CN=Users,{base_dn}"
+    sec_admins_dn = f"CN=MSP Security Admins,OU=Groups,{base_dn}"
+    child_admin_team_dn = f"CN=MSP SecOps Tier-3,OU=SubTeams,OU=Groups,{base_dn}"
+    ops_dn = f"CN=MSP Operations,OU=Groups,{base_dn}"
+    audit_dn = f"CN=MSP ReadOnly,OU=Groups,{base_dn}"
+
+    genera_user_dn = f"CN=Genera,OU=MSP,{base_dn}"
+    nested_admin_user_dn = f"CN=Clara SecOps,OU=MSP,{base_dn}"
+    direct_viewer_user_dn = f"CN=Erik Exec,OU=Management,{base_dn}"
+    unmapped_user_dn = f"CN=Guest Partner,OU=External,{base_dn}"
+    computer_dn = f"CN=SRV01,OU=Domain Controllers,{base_dn}"
+    krbtgt_dn = f"CN=krbtgt,CN=Users,{base_dn}"
+
+    ad_entries = [
+        {
+            "dn": da_dn,
+            "attrs": {
+                "objectClass": ["top", "group"],
+                "cn": "Domain Admins",
+                "sAMAccountName": "Domain Admins",
+                "description": "Domain superadmins",
+                "primaryGroupToken": "512",
+                "member": [],
+            },
+        },
+        {
+            "dn": sec_admins_dn,
+            "attrs": {
+                "objectClass": ["top", "group"],
+                "cn": "MSP Security Admins",
+                "sAMAccountName": "MSP-Security-Admins",
+                "description": "Secondary Admin group with nested child team",
+                "member": [child_admin_team_dn],
+            },
+        },
+        {
+            "dn": child_admin_team_dn,
+            "attrs": {
+                "objectClass": ["top", "group"],
+                "cn": "MSP SecOps Tier-3",
+                "sAMAccountName": "MSP-SecOps-Tier3",
+                "description": "Nested child team under MSP Security Admins",
+                "member": [nested_admin_user_dn],
+            },
+        },
+        {
+            "dn": ops_dn,
+            "attrs": {
+                "objectClass": ["top", "group"],
+                "cn": "MSP Operations",
+                "sAMAccountName": "MSP-Operations",
+                "description": "Org 1 Editor group",
+                "member": [],
+            },
+        },
+        {
+            "dn": audit_dn,
+            "attrs": {
+                "objectClass": ["top", "group"],
+                "cn": "MSP ReadOnly",
+                "sAMAccountName": "MSP-ReadOnly",
+                "description": "Org 1 Viewer group",
+                "member": [],
+            },
+        },
+        {
+            "dn": genera_user_dn,
+            "attrs": {
+                "objectClass": ["top", "person", "organizationalPerson", "user"],
+                "cn": "Genera",
+                "displayName": "Genera Engineer",
+                "sAMAccountName": "Genera",
+                "userPrincipalName": "Genera@ad.bls-isp.net",
+                "mail": "genera@bls-isp.net",
+                "memberOf": [],
+            },
+        },
+        {
+            "dn": nested_admin_user_dn,
+            "attrs": {
+                "objectClass": ["top", "person", "organizationalPerson", "user"],
+                "cn": "Clara SecOps",
+                "displayName": "Clara Security Architect",
+                "sAMAccountName": "c.secops",
+                "userPrincipalName": "c.secops@ad.bls-isp.net",
+                "mail": "clara@bls-isp.net",
+                "memberOf": [child_admin_team_dn],
+            },
+        },
+        {
+            "dn": direct_viewer_user_dn,
+            "attrs": {
+                "objectClass": ["top", "person", "organizationalPerson", "user"],
+                "cn": "Erik Exec",
+                "displayName": "Erik Executive",
+                "sAMAccountName": "e.exec",
+                "userPrincipalName": "e.exec@ad.bls-isp.net",
+                "mail": "erik@bls-isp.net",
+                "memberOf": [],
+            },
+        },
+        {
+            "dn": unmapped_user_dn,
+            "attrs": {
+                "objectClass": ["top", "person", "organizationalPerson", "user"],
+                "cn": "Guest Partner",
+                "displayName": "External Guest",
+                "sAMAccountName": "g.partner",
+                "userPrincipalName": "g.partner@ad.bls-isp.net",
+                "mail": "guest@partner.example",
+                "memberOf": [],
+            },
+        },
+        {
+            "dn": computer_dn,
+            "attrs": {
+                "objectClass": ["top", "person", "organizationalPerson", "user", "computer"],
+                "cn": "SRV01",
+                "sAMAccountName": "SRV01$",
+                "memberOf": [],
+            },
+        },
+        {
+            "dn": krbtgt_dn,
+            "attrs": {
+                "objectClass": ["top", "person", "organizationalPerson", "user"],
+                "cn": "krbtgt",
+                "sAMAccountName": "krbtgt",
+                "memberOf": [],
+            },
+        },
+    ]
+
+    ldap_srv = LiveBERLDAPv3Server(
+        expected_bind_dn=bind_dn,
+        expected_bind_pw=bind_pw,
+        entries=ad_entries,
+        max_page_size=3,
+        emit_referral=True,
+    )
+    ldap_srv.start()
+    try:
+        ad_cfg = {
+            "host": "127.0.0.1",
+            "port": str(ldap_srv.port),
+            "schema": "ad",
+            "base_dn": base_dn,
+            "bind_dn": bind_dn,
+            "bind_password": bind_pw,
+            "tls": False,
+        }
+        hub = NS8ModuleInstance(
+            kind="hub",
+            install_dir=tmp_path / "hub_v104_home",
+            module_id="central-monitoring-hub1",
+            tcp_port=20080,
+            backends=live_backends,
+        )
+        hub.set_ldap_domain("ad.bls-isp.net", ad_cfg)
+        await hub.run_script("actions/create-module/20initialize")
+
+        # 1. Real `discover-ldap-groups/20read`: validates schema, returns BOTH `groups` and `users`,
+        #    includes human user `Genera`, and strictly excludes `SRV01$` and `krbtgt`!
+        _, _, _, disc = await hub.run_script(
+            "actions/discover-ldap-groups/20read",
+            {"domain": "ad.bls-isp.net"},
+        )
+        assert disc["ok"] is True
+        assert len(disc["groups"]) == 5
+        discovered_usernames = [u["username"] for u in disc["users"]]
+        assert "Genera" in discovered_usernames
+        assert "c.secops" in discovered_usernames
+        assert "e.exec" in discovered_usernames
+        assert "SRV01$" not in discovered_usernames
+        assert "SRV01" not in discovered_usernames
+        assert "krbtgt" not in discovered_usernames
+        genera_disc = next(u for u in disc["users"] if u["username"] == "Genera")
+        assert genera_disc["dn"] == genera_user_dn
+
+        # Create active Customer Org `acme-gmbh` so multi-org `ldap.toml` rendering is verified too
+        _, _, _, acme_saved = await hub.run_script(
+            "actions/save-tenant/20save",
+            {
+                "customer": "acme-gmbh",
+                "display_name": "Acme GmbH",
+                "sites": ["hq"],
+                "contact_emails": ["it@acme.de"],
+                "customer_portal_enabled": True,
+            },
+        )
+        acme_oid = int(acme_saved["grafana_org_id"])
+        assert acme_oid > 1
+
+        # 2. Real `configure-module` + `get-configuration` round-trip with multi-select arrays
+        #    mixing multiple groups, bare short username `"Genera"`, and explicit user DN!
+        v104_cfg_req = {
+            "host": "monitoring.bls-isp.net",
+            "lets_encrypt": True,
+            "http2https": True,
+            "storage_mode": "local",
+            "ldap_enabled": True,
+            "ldap_domain": "ad.bls-isp.net",
+            "ldap_admin_principals": ["Domain Admins", sec_admins_dn],
+            "ldap_editor_principals": [ops_dn, "Genera"],
+            "ldap_viewer_principals": [audit_dn, direct_viewer_user_dn],
+            "grafana_admin_password": "MspV104AdminPassword!",
+        }
+        await hub.run_script("actions/configure-module/01hostname-validation", v104_cfg_req)
+        await hub.run_script("actions/configure-module/20configure", v104_cfg_req)
+
+        _, _, _, read_cfg = await hub.run_script("actions/get-configuration/20read", {})
+        assert read_cfg["ldap_admin_principals"] == ["Domain Admins", sec_admins_dn]
+        assert read_cfg["ldap_editor_principals"] == [ops_dn, "Genera"]
+        assert read_cfg["ldap_viewer_principals"] == [audit_dn, direct_viewer_user_dn]
+        assert read_cfg["ldap_admin_group"] == "Domain Admins"
+        assert read_cfg["ldap_editor_group"] == ops_dn
+        assert read_cfg["ldap_viewer_group"] == audit_dn
+
+        # 3. Verify `ldap.toml` contains `member_of = "distinguishedName"`, compound `group_search_filter`,
+        #    and ordered `[[servers.group_mappings]]` across `org_id = 1` AND `org_id = <acme_oid>`!
+        ldap_toml = (hub.config_dir / "grafana" / "ldap.toml").read_text(encoding="utf-8")
+        assert 'member_of = "distinguishedName"' in ldap_toml
+        assert (
+            'search_filter = "(&(objectClass=user)(!(objectClass=computer))'
+            '(|(sAMAccountName=%s)(userPrincipalName=%s)))"' in ldap_toml
+        )
+        assert (
+            'group_search_filter = "(|(&(objectClass=group)(member:1.2.840.113556.1.4.1941:=%s))'
+            '(&(objectClass=user)(distinguishedName=%s)))"' in ldap_toml
+        )
+        assert 'group_dn = "*"' not in ldap_toml
+
+        mappings = _parse_ldap_group_mappings(ldap_toml)
+        assert mappings == [
+            {"group_dn": da_dn, "org_role": "Admin", "grafana_admin": True, "org_id": 1},
+            {"group_dn": sec_admins_dn, "org_role": "Admin", "grafana_admin": True, "org_id": 1},
+            {"group_dn": ops_dn, "org_role": "Editor", "org_id": 1},
+            {"group_dn": genera_user_dn, "org_role": "Editor", "org_id": 1},
+            {"group_dn": audit_dn, "org_role": "Viewer", "org_id": 1},
+            {"group_dn": direct_viewer_user_dn, "org_role": "Viewer", "org_id": 1},
+            {"group_dn": da_dn, "org_role": "Admin", "org_id": acme_oid},
+            {"group_dn": sec_admins_dn, "org_role": "Admin", "org_id": acme_oid},
+            {"group_dn": ops_dn, "org_role": "Viewer", "org_id": acme_oid},
+            {"group_dn": genera_user_dn, "org_role": "Viewer", "org_id": acme_oid},
+            {"group_dn": audit_dn, "org_role": "Viewer", "org_id": acme_oid},
+            {"group_dn": direct_viewer_user_dn, "org_role": "Viewer", "org_id": acme_oid},
+        ]
+
+        # 4. Real `actions/test-ldap-user/20test` with `ldap_*_principals`:
+        #    - `Genera` -> `Editor` via direct user DN
+        #    - `c.secops` -> `Admin` via nested AD group `sec_admins_dn`
+        #    - `e.exec` -> `Viewer` via direct user DN
+        #    - `g.partner` -> `None`
+        #    - `SRV01$` -> `found: False` (computer account rejected!)
+        principals_payload = {
+            "ldap_admin_principals": ["Domain Admins", sec_admins_dn],
+            "ldap_editor_principals": [ops_dn, "Genera"],
+            "ldap_viewer_principals": [audit_dn, direct_viewer_user_dn],
+        }
+
+        _, _, _, test_genera = await hub.run_script(
+            "actions/test-ldap-user/20test",
+            {"domain": "ad.bls-isp.net", "username": "Genera", **principals_payload},
+        )
+        assert test_genera["ok"] is True
+        assert test_genera["found"] is True
+        assert test_genera["matched_role"] == "Editor"
+        assert test_genera["grafana_admin"] is False
+        assert f"via user '{genera_user_dn}'" in test_genera["message"]
+
+        _, _, _, test_clara = await hub.run_script(
+            "actions/test-ldap-user/20test",
+            {"domain": "ad.bls-isp.net", "username": "c.secops", **principals_payload},
+        )
+        assert test_clara["ok"] is True
+        assert test_clara["found"] is True
+        assert test_clara["matched_role"] == "Admin"
+        assert test_clara["grafana_admin"] is True
+        assert f"via group '{sec_admins_dn}'" in test_clara["message"]
+
+        _, _, _, test_erik = await hub.run_script(
+            "actions/test-ldap-user/20test",
+            {"domain": "ad.bls-isp.net", "username": "e.exec", **principals_payload},
+        )
+        assert test_erik["ok"] is True
+        assert test_erik["found"] is True
+        assert test_erik["matched_role"] == "Viewer"
+        assert test_erik["grafana_admin"] is False
+        assert f"via user '{direct_viewer_user_dn}'" in test_erik["message"]
+
+        _, _, _, test_guest = await hub.run_script(
+            "actions/test-ldap-user/20test",
+            {"domain": "ad.bls-isp.net", "username": "g.partner", **principals_payload},
+        )
+        assert test_guest["ok"] is True
+        assert test_guest["found"] is True
+        assert test_guest["matched_role"] == "None"
+        assert test_guest["grafana_admin"] is False
+
+        _, _, _, test_comp = await hub.run_script(
+            "actions/test-ldap-user/20test",
+            {"domain": "ad.bls-isp.net", "username": "SRV01$", **principals_payload},
+        )
+        assert test_comp["ok"] is True
+        assert test_comp["found"] is False
+        assert test_comp["matched_role"] == "None"
+
+        # 5. Legacy v1.0.1 -> v1.0.4 upgrade backfill (`LDAP_EDITOR_GROUP="Genera"` without `*_B64`
+        #    -> backfilled to `["Genera"]` -> resolved to `CN=Genera,OU=MSP,...` in `ldap.toml`!)
+        legacy_hub = NS8ModuleInstance(
+            kind="hub",
+            install_dir=tmp_path / "hub_v101_legacy_upgrade",
+            module_id="central-monitoring-hub2",
+            tcp_port=20081,
+            backends=live_backends,
+        )
+        legacy_hub.set_ldap_domain("ad.bls-isp.net", ad_cfg)
+        await legacy_hub.run_script("actions/create-module/20initialize")
+
+        leg_meta = legacy_hub.read_meta()
+        leg_env = leg_meta["persisted_env"]
+        leg_env["CONFIGURED"] = "true"
+        leg_env["TRAEFIK_HOST"] = "monitoring-legacy.bls-isp.net"
+        leg_env["LDAP_ENABLED"] = "true"
+        leg_env["LDAP_DOMAIN"] = "ad.bls-isp.net"
+        leg_env["LDAP_ADMIN_GROUP"] = "Domain Admins"
+        leg_env["LDAP_EDITOR_GROUP"] = "Genera"
+        leg_env["LDAP_VIEWER_GROUP"] = ""
+        for b64_k in (
+            "LDAP_ADMIN_PRINCIPALS_B64",
+            "LDAP_EDITOR_PRINCIPALS_B64",
+            "LDAP_VIEWER_PRINCIPALS_B64",
+        ):
+            leg_env.pop(b64_k, None)
+        legacy_hub.meta_file.write_bytes((json.dumps(leg_meta, indent=2) + "\n").encode("utf-8"))
+        leg_lines = [f"{k}={v}" for k, v in sorted(leg_env.items())]
+        legacy_hub.env_file.write_bytes(("\n".join(leg_lines) + "\n").encode("utf-8"))
+
+        await legacy_hub.run_script("update-module.d/20pull_images", validate_io=False)
+        await legacy_hub.run_script("update-module.d/50update", validate_io=False)
+
+        _, _, _, upg_cfg = await legacy_hub.run_script("actions/get-configuration/20read", {})
+        assert upg_cfg["ldap_admin_principals"] == ["Domain Admins"]
+        assert upg_cfg["ldap_editor_principals"] == ["Genera"]
+        assert upg_cfg["ldap_viewer_principals"] == []
+
+        upg_toml = (legacy_hub.config_dir / "grafana" / "ldap.toml").read_text(encoding="utf-8")
+        upg_mappings = _parse_ldap_group_mappings(upg_toml)
+        assert upg_mappings == [
+            {"group_dn": da_dn, "org_role": "Admin", "grafana_admin": True, "org_id": 1},
+            {"group_dn": genera_user_dn, "org_role": "Editor", "org_id": 1},
+        ]
+    finally:
+        ldap_srv.stop()
+
 
 
 

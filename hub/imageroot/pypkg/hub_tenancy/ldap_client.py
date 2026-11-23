@@ -16,7 +16,7 @@ import os
 import socket
 import ssl
 import struct
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 MAX_BER_MESSAGE_BYTES = 16 * 1024 * 1024
 PAGED_RESULTS_OID = "1.2.840.113556.1.4.319"
@@ -774,6 +774,65 @@ def _query_groups_internal(
     return items
 
 
+def _query_users_internal(
+    conn: LDAPv3Connection, base_dn: str, schema: str
+) -> list[dict[str, str]]:
+    if schema == "ad":
+        user_filter = "(&(objectClass=user)(!(objectClass=computer)))"
+        attrs = [
+            "distinguishedName",
+            "sAMAccountName",
+            "userPrincipalName",
+            "displayName",
+            "cn",
+            "givenName",
+            "sn",
+            "mail",
+        ]
+    else:
+        user_filter = "(|(objectClass=inetOrgPerson)(objectClass=posixAccount))"
+        attrs = ["uid", "cn", "displayName", "givenName", "sn", "mail"]
+
+    entries = conn.search(base_dn, user_filter, attrs)
+    by_dn: dict[str, dict[str, str]] = {}
+    for entry in entries:
+        dn = (entry.first_str("distinguishedName") if schema == "ad" else "") or entry.dn.strip()
+        if not dn:
+            continue
+        rdn_val = extract_first_rdn_value(dn)
+        cn = entry.first_str("cn")
+        given_sn = " ".join(
+            p for p in (entry.first_str("givenName"), entry.first_str("sn")) if p
+        ).strip()
+        mail = entry.first_str("mail")
+
+        if schema == "ad":
+            sam = entry.first_str("sAMAccountName")
+            if sam.endswith("$") or rdn_val.endswith("$") or sam.lower() == "krbtgt":
+                continue
+            username = sam or rdn_val or dn
+            upn = entry.first_str("userPrincipalName")
+        else:
+            uid = entry.first_str("uid")
+            username = uid or cn or rdn_val or dn
+            upn = ""
+
+        display_name = entry.first_str("displayName") or given_sn or cn or username
+        by_dn[dn.lower()] = {
+            "username": username,
+            "display_name": display_name,
+            "email": mail,
+            "upn": upn,
+            "cn": cn,
+            "rdn": rdn_val,
+            "dn": dn,
+        }
+
+    items = list(by_dn.values())
+    items.sort(key=lambda u: (u["username"].lower(), u["dn"].lower()))
+    return items
+
+
 def resolve_group_dn(
     group_value: str,
     *,
@@ -809,13 +868,77 @@ def resolve_group_dn(
     return f"cn={spec},ou=Groups,{base_dn}"
 
 
-def discover_domain_groups_raw(
+def resolve_principal_dn(
+    spec_value: str,
+    *,
+    base_dn: str,
+    schema: str,
+    discovered_groups: list[dict[str, str]] | None = None,
+    discovered_users: list[dict[str, str]] | None = None,
+) -> str:
+    """Resolve a group or user principal (short name, `group:x`/`user:x`, or full DN) to its DN."""
+    raw = str(spec_value or "").strip()
+    if not raw:
+        return ""
+
+    kind = "any"
+    raw_low = raw.lower()
+    if raw_low.startswith("group:"):
+        kind = "group"
+        spec = raw[6:].strip()
+    elif raw_low.startswith("user:"):
+        kind = "user"
+        spec = raw[5:].strip()
+    else:
+        spec = raw
+
+    if not spec:
+        return ""
+    if "=" in spec:
+        return spec
+
+    needle = spec.lower()
+    if kind in ("any", "group") and discovered_groups:
+        for grp in discovered_groups:
+            g_candidates = (
+                str(grp.get("name") or "").strip().lower(),
+                str(grp.get("cn") or "").strip().lower(),
+                str(grp.get("sam") or "").strip().lower(),
+                str(grp.get("rdn") or extract_first_rdn_value(str(grp.get("dn") or ""))).strip().lower(),
+            )
+            if needle in g_candidates and grp.get("dn"):
+                return str(grp["dn"])
+
+    if kind in ("any", "user") and discovered_users:
+        for usr in discovered_users:
+            u_candidates = (
+                str(usr.get("username") or "").strip().lower(),
+                str(usr.get("upn") or "").strip().lower(),
+                str(usr.get("cn") or "").strip().lower(),
+                str(usr.get("display_name") or "").strip().lower(),
+                str(usr.get("email") or "").strip().lower(),
+                str(usr.get("rdn") or extract_first_rdn_value(str(usr.get("dn") or ""))).strip().lower(),
+            )
+            if needle in u_candidates and usr.get("dn"):
+                return str(usr["dn"])
+
+    if kind == "user" and schema.lower() != "ad":
+        if not base_dn:
+            return f"uid={spec}"
+        if "ou=people" in base_dn.lower() or "ou=users" in base_dn.lower():
+            return f"uid={spec},{base_dn}"
+        return f"uid={spec},ou=People,{base_dn}"
+
+    return resolve_group_dn(spec, base_dn=base_dn, schema=schema, discovered_groups=None)
+
+
+def discover_directory_principals_raw(
     domain: str,
     *,
     ldapproxy_factory: Callable[[], Any] | None = None,
     timeout: float = 5.0,
-) -> list[dict[str, str]]:
-    """Query full group metadata (`name`, `cn`, `sam`, `rdn`, `dn`, `description`) for DN resolution."""
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Query both groups and users in one bound LDAPv3 session."""
     dom = str(domain or "").strip()
     info = _get_domain_info(dom, ldapproxy_factory=ldapproxy_factory)
     host = str(info.get("host") or "127.0.0.1").strip() or "127.0.0.1"
@@ -835,7 +958,24 @@ def discover_domain_groups_raw(
         timeout=timeout,
     ) as conn:
         conn.simple_bind(bind_dn, bind_pw)
-        return _query_groups_internal(conn, base_dn, schema)
+        groups = _query_groups_internal(conn, base_dn, schema)
+        users = _query_users_internal(conn, base_dn, schema)
+        return groups, users
+
+
+def discover_domain_groups_raw(
+    domain: str,
+    *,
+    ldapproxy_factory: Callable[[], Any] | None = None,
+    timeout: float = 5.0,
+) -> list[dict[str, str]]:
+    """Query full group metadata (`name`, `cn`, `sam`, `rdn`, `dn`, `description`) for DN resolution."""
+    groups, _ = discover_directory_principals_raw(
+        domain,
+        ldapproxy_factory=ldapproxy_factory,
+        timeout=timeout,
+    )
+    return groups
 
 
 def discover_domain_groups(
@@ -844,7 +984,7 @@ def discover_domain_groups(
     ldapproxy_factory: Callable[[], Any] | None = None,
     timeout: float = 5.0,
 ) -> dict[str, Any]:
-    """Enumerate directory groups for `discover-ldap-groups` action."""
+    """Enumerate directory groups and users for `discover-ldap-groups` action."""
     dom = str(domain or "").strip()
     schema = ""
     base_dn = ""
@@ -852,7 +992,7 @@ def discover_domain_groups(
         info = _get_domain_info(dom, ldapproxy_factory=ldapproxy_factory)
         schema = str(info.get("schema") or "ad").strip().lower()
         base_dn = str(info.get("base_dn") or "").strip()
-        raw_groups = discover_domain_groups_raw(
+        raw_groups, raw_users = discover_directory_principals_raw(
             dom,
             ldapproxy_factory=ldapproxy_factory,
             timeout=timeout,
@@ -865,12 +1005,22 @@ def discover_domain_groups(
             }
             for g in raw_groups
         ]
+        public_users = [
+            {
+                "username": u["username"],
+                "display_name": u["display_name"],
+                "email": u["email"],
+                "dn": u["dn"],
+            }
+            for u in raw_users
+        ]
         return {
             "ok": True,
             "domain": dom,
             "schema": schema,
             "base_dn": base_dn,
             "groups": public_groups,
+            "users": public_users,
             "error": "",
         }
     except Exception as exc:
@@ -880,8 +1030,76 @@ def discover_domain_groups(
             "schema": schema,
             "base_dn": base_dn,
             "groups": [],
+            "users": [],
             "error": str(exc),
         }
+
+
+def _normalize_principal_list(
+    principals: Sequence[str] | None,
+    legacy_single: str,
+) -> list[str]:
+    if principals is not None:
+        source = list(principals)
+    elif legacy_single and str(legacy_single).strip():
+        source = [str(legacy_single).strip()]
+    else:
+        source = []
+
+    result: list[str] = []
+    seen_low: set[str] = set()
+    for item in source:
+        val = str(item or "").strip()
+        if not val:
+            continue
+        vlow = val.lower()
+        if vlow not in seen_low:
+            seen_low.add(vlow)
+            result.append(val)
+    return result
+
+
+def _resolve_principal_dns(
+    specs: Sequence[str],
+    *,
+    base_dn: str,
+    schema: str,
+    discovered_groups: list[dict[str, str]] | None,
+    discovered_users: list[dict[str, str]] | None,
+) -> list[str]:
+    resolved: list[str] = []
+    seen_low: set[str] = set()
+    for spec in specs:
+        dn = resolve_principal_dn(
+            spec,
+            base_dn=base_dn,
+            schema=schema,
+            discovered_groups=discovered_groups,
+            discovered_users=discovered_users,
+        )
+        if not dn:
+            continue
+        dlow = dn.lower()
+        if dlow not in seen_low:
+            seen_low.add(dlow)
+            resolved.append(dn)
+    return resolved
+
+
+def _match_principal_role(
+    role_name: str,
+    principal_dns: Sequence[str],
+    user_dn: str,
+    member_lower: set[str],
+) -> str | None:
+    user_dn_low = user_dn.lower()
+    for dn in principal_dns:
+        dlow = dn.lower()
+        if user_dn_low and dlow == user_dn_low:
+            return f"Matched Org 1 {role_name} role via user '{dn}'."
+        if dlow in member_lower:
+            return f"Matched Org 1 {role_name} role via group '{dn}'."
+    return None
 
 
 def test_domain_user(
@@ -891,10 +1109,13 @@ def test_domain_user(
     ldap_admin_group: str = "",
     ldap_editor_group: str = "",
     ldap_viewer_group: str = "",
+    ldap_admin_principals: Sequence[str] | None = None,
+    ldap_editor_principals: Sequence[str] | None = None,
+    ldap_viewer_principals: Sequence[str] | None = None,
     ldapproxy_factory: Callable[[], Any] | None = None,
     timeout: float = 5.0,
 ) -> dict[str, Any]:
-    """Search a user in NS8 AD/OpenLDAP and evaluate Grafana Org 1 role mapping."""
+    """Search a user in NS8 AD/OpenLDAP and evaluate Grafana Org 1 multi-principal role mapping."""
     dom = str(domain or "").strip()
     uname = str(username or "").strip()
     try:
@@ -920,7 +1141,8 @@ def test_domain_user(
 
             if schema == "ad":
                 user_filter = (
-                    f"(&(objectClass=user)(|(sAMAccountName={esc_user})(userPrincipalName={esc_user})))"
+                    f"(&(objectClass=user)(!(objectClass=computer))"
+                    f"(|(sAMAccountName={esc_user})(userPrincipalName={esc_user})))"
                 )
                 user_attrs = [
                     "distinguishedName",
@@ -983,6 +1205,7 @@ def test_domain_user(
                 group_dn_map[direct_dn.lower()] = direct_dn
 
             all_groups = _query_groups_internal(conn, base_dn, schema)
+            all_users = _query_users_internal(conn, base_dn, schema)
 
             if schema == "ad" and user_dn:
                 esc_dn = escape_ldap_filter_value(user_dn)
@@ -1023,43 +1246,54 @@ def test_domain_user(
         member_of = sorted(group_dn_map.values(), key=lambda d: d.lower())
         member_lower = set(group_dn_map.keys())
 
-        admin_dn = resolve_group_dn(
-            ldap_admin_group,
+        admin_specs = _normalize_principal_list(ldap_admin_principals, ldap_admin_group)
+        editor_specs = _normalize_principal_list(ldap_editor_principals, ldap_editor_group)
+        viewer_specs = _normalize_principal_list(ldap_viewer_principals, ldap_viewer_group)
+
+        admin_dns = _resolve_principal_dns(
+            admin_specs,
             base_dn=base_dn,
             schema=schema,
             discovered_groups=all_groups,
+            discovered_users=all_users,
         )
-        editor_dn = resolve_group_dn(
-            ldap_editor_group,
+        editor_dns = _resolve_principal_dns(
+            editor_specs,
             base_dn=base_dn,
             schema=schema,
             discovered_groups=all_groups,
+            discovered_users=all_users,
         )
-        viewer_dn = resolve_group_dn(
-            ldap_viewer_group,
+        viewer_dns = _resolve_principal_dns(
+            viewer_specs,
             base_dn=base_dn,
             schema=schema,
             discovered_groups=all_groups,
+            discovered_users=all_users,
         )
 
-        if admin_dn and admin_dn.lower() in member_lower:
+        admin_match = _match_principal_role("Admin", admin_dns, user_dn, member_lower)
+        editor_match = _match_principal_role("Editor", editor_dns, user_dn, member_lower)
+        viewer_match = _match_principal_role("Viewer", viewer_dns, user_dn, member_lower)
+
+        if admin_match:
             matched_role = "Admin"
             grafana_admin = True
-            msg = f"Matched Org 1 Admin role via group '{admin_dn}'."
-        elif editor_dn and editor_dn.lower() in member_lower:
+            msg = admin_match
+        elif editor_match:
             matched_role = "Editor"
             grafana_admin = False
-            msg = f"Matched Org 1 Editor role via group '{editor_dn}'."
-        elif viewer_dn and viewer_dn.lower() in member_lower:
+            msg = editor_match
+        elif viewer_match:
             matched_role = "Viewer"
             grafana_admin = False
-            msg = f"Matched Org 1 Viewer role via group '{viewer_dn}'."
+            msg = viewer_match
         else:
             matched_role = "None"
             grafana_admin = False
             msg = (
                 "User found in directory, but is not a member of any mapped "
-                "Grafana Org 1 group (Admin/Editor/Viewer)."
+                "Grafana Org 1 group or user principal (Admin/Editor/Viewer)."
             )
 
         return {

@@ -138,6 +138,36 @@
       "default": "",
       "description": "Optional LDAP/AD group short CN or full Distinguished Name mapped to Grafana Org 1 Viewer role."
     },
+    "ldap_admin_principals": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      },
+      "description": "Multi-select LDAP/AD group or user DNs/names mapped to Grafana Org 1 Admin role."
+    },
+    "ldap_editor_principals": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      },
+      "description": "Multi-select LDAP/AD group or user DNs/names mapped to Grafana Org 1 Editor role."
+    },
+    "ldap_viewer_principals": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      },
+      "description": "Multi-select LDAP/AD group or user DNs/names mapped to Grafana Org 1 Viewer role."
+    },
     "grafana_admin_password": {
       "type": "string",
       "maxLength": 256,

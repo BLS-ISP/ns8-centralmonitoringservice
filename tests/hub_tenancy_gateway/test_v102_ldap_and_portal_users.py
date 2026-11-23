@@ -672,7 +672,7 @@ class TestLiveLDAPv3ClientDiscoveryAndTester:
                 assert inj_res["matched_role"] == "None"
                 # Confirm wire BER filter compiled strictly to equalityMatch (`eq`), never `present`/`substr`!
                 user_search_ast = srv.recorded_filters[0]
-                or_branch = user_search_ast[1][1]
+                or_branch = user_search_ast[1][-1]
                 assert or_branch[0] == "or"
                 for leaf in or_branch[1]:
                     assert leaf[0] == "eq"
@@ -841,12 +841,13 @@ class TestLiveLDAPv3ClientDiscoveryAndTester:
             assert 'group_dn = "CN=MSP Operations,OU=Groups,DC=ad,DC=bls-isp,DC=net"' in txt
             assert 'group_dn = "CN=MSP ReadOnly,OU=Groups,DC=ad,DC=bls-isp,DC=net"' in txt
             assert 'org_role = "Viewer"' in txt
-            # Verified recursive AD nested-group OID & distinguishedName user attribute!
+            # Verified recursive AD nested-group OID + direct user DN filter & distinguishedName attribute!
             assert (
-                f'group_search_filter = "(&(objectClass=group)(member:{AD_IN_CHAIN_OID}:=%s))"'
+                f'group_search_filter = "(|(&(objectClass=group)(member:{AD_IN_CHAIN_OID}:=%s))(&(objectClass=user)(distinguishedName=%s)))"'
                 in txt
             )
             assert 'group_search_filter_user_attribute = "distinguishedName"' in txt
+            assert 'member_of = "distinguishedName"' in txt
             assert 'group_search_base_dns = ["DC=ad,DC=bls-isp,DC=net"]' in txt
             assert 'group_dn = "*"' not in txt
             assert len(reload_hits) == 1
@@ -1346,7 +1347,7 @@ class TestV102AuditRemediations:
         import hub_gateway
         from hub_gateway.app import GatewaySettings, create_gateway_app
 
-        assert hub_gateway.__version__ == "1.0.3"
+        assert hub_gateway.__version__ == "1.0.4"
 
         upstream_hits: list[tuple[str, str]] = []
         g_app = web.Application()

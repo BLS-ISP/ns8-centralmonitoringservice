@@ -44,6 +44,12 @@ def run_ns8_action(action: str, payload: dict, state_dir: Path, extra_env: dict 
     jsonschema.validate(payload, load_schema(action, "input"))
 
     env = os.environ.copy()
+    for _k in (
+        "LDAP_ADMIN_PRINCIPALS_B64",
+        "LDAP_EDITOR_PRINCIPALS_B64",
+        "LDAP_VIEWER_PRINCIPALS_B64",
+    ):
+        env.pop(_k, None)
     env["STATE_DIR"] = str(state_dir)
     env["TRAEFIK_HOST"] = "monitoring.msp.example.com"
     if extra_env:

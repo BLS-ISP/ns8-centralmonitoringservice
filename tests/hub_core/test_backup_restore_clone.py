@@ -213,3 +213,79 @@ def test_dump_state_podman_exec_avoids_world_readable_tmp_and_clone_syncs_orgs(
     assert rc == 0, stderr
     assert "probe_configs" in synced, "clone-module/50configure must invoke render_all_probe_configs"
     assert "grafana_orgs" in synced, "clone-module/50configure must invoke sync_all_orgs_if_running"
+
+
+def test_v104_sec01_restore_legacy_snapshot_overwrites_initialized_ldap_principals_b64(
+    ns8_env: FakeNS8Env,
+) -> None:
+    from hub_core.env_store import decode_ldap_principals
+
+    # 1. NS8 restore-module creates a fresh v1.0.4 module first (seeding ["Domain Admins"])
+    rc_init, _, err_init = execute_script(IMAGEROOT / "actions" / "create-module" / "20initialize")
+    assert rc_init == 0, err_init
+    assert decode_ldap_principals(
+        ns8_env.persisted_env, "LDAP_ADMIN_PRINCIPALS_B64", "LDAP_ADMIN_GROUP"
+    ) == ["Domain Admins"]
+
+    # 2. Restore a v1.0.1-v1.0.3 Restic snapshot (singular LDAP_*_GROUP only, no *_B64 keys)
+    rc_copy, _, err_copy = execute_script(
+        IMAGEROOT / "actions" / "restore-module" / "06copyenv",
+        payload={
+            "environment": {
+                "TRAEFIK_HOST": "restored-sec.msp.example.com",
+                "TRAEFIK_LETS_ENCRYPT": "true",
+                "TRAEFIK_HTTP2HTTPS": "true",
+                "STORAGE_MODE": "local",
+                "CONFIGURED": "true",
+                "LDAP_ENABLED": "true",
+                "LDAP_DOMAIN": "ad.msp.example.com",
+                "LDAP_ADMIN_GROUP": "MSP-SecAdmins",
+                "LDAP_EDITOR_GROUP": "Genera",
+                "LDAP_VIEWER_GROUP": "MSP-Viewers",
+            }
+        },
+    )
+    assert rc_copy == 0, err_copy
+    assert decode_ldap_principals(
+        ns8_env.persisted_env, "LDAP_ADMIN_PRINCIPALS_B64", "LDAP_ADMIN_GROUP"
+    ) == ["MSP-SecAdmins"]
+    assert decode_ldap_principals(
+        ns8_env.persisted_env, "LDAP_EDITOR_PRINCIPALS_B64", "LDAP_EDITOR_GROUP"
+    ) == ["Genera"]
+    assert decode_ldap_principals(
+        ns8_env.persisted_env, "LDAP_VIEWER_PRINCIPALS_B64", "LDAP_VIEWER_GROUP"
+    ) == ["MSP-Viewers"]
+
+    rc_read, out_read, err_read = execute_script(
+        IMAGEROOT / "actions" / "get-configuration" / "20read",
+        payload={},
+    )
+    assert rc_read == 0, err_read
+    read_doc = json.loads(out_read)
+    assert read_doc["ldap_admin_principals"] == ["MSP-SecAdmins"]
+    assert read_doc["ldap_editor_principals"] == ["Genera"]
+    assert read_doc["ldap_viewer_principals"] == ["MSP-Viewers"]
+
+    # 3. Also verify cleared LDAP_ADMIN_GROUP="" in legacy snapshot becomes [] (never re-grants Domain Admins)
+    rc_clear, _, err_clear = execute_script(
+        IMAGEROOT / "actions" / "restore-module" / "06copyenv",
+        payload={
+            "environment": {
+                "LDAP_ENABLED": "true",
+                "LDAP_DOMAIN": "ad.msp.example.com",
+                "LDAP_ADMIN_GROUP": "",
+                "LDAP_EDITOR_GROUP": "",
+                "LDAP_VIEWER_GROUP": "MSP-AuditOnly",
+            }
+        },
+    )
+    assert rc_clear == 0, err_clear
+    assert decode_ldap_principals(
+        ns8_env.persisted_env, "LDAP_ADMIN_PRINCIPALS_B64", "LDAP_ADMIN_GROUP"
+    ) == []
+    assert decode_ldap_principals(
+        ns8_env.persisted_env, "LDAP_EDITOR_PRINCIPALS_B64", "LDAP_EDITOR_GROUP"
+    ) == []
+    assert decode_ldap_principals(
+        ns8_env.persisted_env, "LDAP_VIEWER_PRINCIPALS_B64", "LDAP_VIEWER_GROUP"
+    ) == ["MSP-AuditOnly"]

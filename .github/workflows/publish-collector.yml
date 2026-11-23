@@ -89,8 +89,8 @@ jobs:
           else
             SAFE_BRANCH="$(echo "${REF_NAME}" | tr '/:' '--' | tr -cd 'A-Za-z0-9._-')"
             if [ "${REF_NAME}" = "main" ]; then
-              PRIMARY_TAG="1.0.3"
-              TAGS+=("1.0.3" "${SAFE_BRANCH}" "sha-${SHORT_SHA:0:7}" "latest")
+              PRIMARY_TAG="1.0.4"
+              TAGS+=("1.0.4" "${SAFE_BRANCH}" "sha-${SHORT_SHA:0:7}" "latest")
             else
               PRIMARY_TAG="${SAFE_BRANCH}"
               TAGS+=("${SAFE_BRANCH}" "sha-${SHORT_SHA:0:7}")

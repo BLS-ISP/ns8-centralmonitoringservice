@@ -217,3 +217,70 @@ def test_secrets_env_writes_raw_podman_compatible_lines_and_rejects_control_char
     assert '\ndomain = """' in ini_text
     assert '\nsecret_key = """' in ini_text
     assert "\ninjected=1" not in ini_text
+
+
+def test_v104_encode_decode_ldap_principals_roundtrip_dedup_and_legacy_fallback() -> None:
+    import re
+
+    from hub_core.env_store import decode_ldap_principals, encode_ldap_principals
+
+    raw_items = [
+        "  CN=Domain Admins,CN=Users,DC=ad,DC=bls-isp,DC=net  ",
+        "cn=domain admins,cn=users,dc=ad,dc=bls-isp,dc=net",
+        "",
+        "CN=Müllers Team,OU=\"IT Ops\",DC=ad,DC=bls-isp,DC=net\r\n",
+        "CN=Genera,CN=Users,DC=ad,DC=bls-isp,DC=net",
+    ]
+    encoded = encode_ldap_principals(raw_items)
+    assert re.match(r"^[A-Za-z0-9_-]+=*\Z", encoded), f"Not URL-safe Base64 ASCII: {encoded!r}"
+
+    decoded = decode_ldap_principals(
+        {"LDAP_ADMIN_PRINCIPALS_B64": encoded, "LDAP_ADMIN_GROUP": "IgnoredLegacy"},
+        "LDAP_ADMIN_PRINCIPALS_B64",
+        "LDAP_ADMIN_GROUP",
+        default_fallback=["Domain Admins"],
+    )
+    assert decoded == [
+        "CN=Domain Admins,CN=Users,DC=ad,DC=bls-isp,DC=net",
+        'CN=Müllers Team,OU="IT Ops",DC=ad,DC=bls-isp,DC=net',
+        "CN=Genera,CN=Users,DC=ad,DC=bls-isp,DC=net",
+    ]
+
+    # Empty list [] encoded in *_B64 must round-trip as [] without falling back to default!
+    empty_b64 = encode_ldap_principals([])
+    assert (
+        decode_ldap_principals(
+            {"LDAP_ADMIN_PRINCIPALS_B64": empty_b64},
+            "LDAP_ADMIN_PRINCIPALS_B64",
+            "LDAP_ADMIN_GROUP",
+            default_fallback=["Domain Admins"],
+        )
+        == []
+    )
+
+    # Legacy env key fallback when *_B64 is absent
+    assert decode_ldap_principals(
+        {"LDAP_EDITOR_GROUP": "CN=Engineers,DC=ad,DC=bls-isp,DC=net"},
+        "LDAP_EDITOR_PRINCIPALS_B64",
+        "LDAP_EDITOR_GROUP",
+        default_fallback=[],
+    ) == ["CN=Engineers,DC=ad,DC=bls-isp,DC=net"]
+
+    # Explicit empty legacy env key returns [] rather than default_fallback
+    assert (
+        decode_ldap_principals(
+            {"LDAP_ADMIN_GROUP": ""},
+            "LDAP_ADMIN_PRINCIPALS_B64",
+            "LDAP_ADMIN_GROUP",
+            default_fallback=["Domain Admins"],
+        )
+        == []
+    )
+
+    # Default fallback only when neither *_B64 nor legacy_key exists in env
+    assert decode_ldap_principals(
+        {},
+        "LDAP_ADMIN_PRINCIPALS_B64",
+        "LDAP_ADMIN_GROUP",
+        default_fallback=["Domain Admins"],
+    ) == ["Domain Admins"]

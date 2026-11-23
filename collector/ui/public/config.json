@@ -20,6 +20,6 @@
     "relnotes_url": "https://github.com/BLS-ISP/ns8-centralmonitoringservice/releases"
   },
   "source": "ghcr.io/bls-isp/central-monitoring-collector",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "license": "GPL-3.0-or-later"
 }

@@ -8,6 +8,7 @@ import os
 import runpy
 import sys
 import types
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -71,7 +72,8 @@ class FakeLdapproxy:
 class FakeNS8Env:
     """Authentic NS8 environment test double enforcing explicit agent.dump_env()."""
 
-    def __init__(self, install_dir: Path) -> None:
+    def __init__(self, install_dir: Path, monkeypatch: pytest.MonkeyPatch | None = None) -> None:
+        self._monkeypatch = monkeypatch
         self.install_dir = install_dir
         self.state_dir = install_dir / "state"
         self.config_dir = install_dir / "config"
@@ -113,12 +115,18 @@ class FakeNS8Env:
     def set_env(self, key: str, value: Any) -> None:
         str_val = str(value)
         self.pending_env[key] = str_val
-        os.environ[key] = str_val
+        if self._monkeypatch is not None:
+            self._monkeypatch.setenv(key, str_val)
+        else:
+            os.environ[key] = str_val
         self.call_log.append(("set_env", (key, str_val)))
 
     def unset_env(self, key: str) -> None:
         self.pending_env.pop(key, None)
-        os.environ.pop(key, None)
+        if self._monkeypatch is not None:
+            self._monkeypatch.delenv(key, raising=False)
+        else:
+            os.environ.pop(key, None)
         self.call_log.append(("unset_env", key))
 
     def dump_env(self) -> None:
@@ -184,9 +192,10 @@ class FakeNS8Env:
 
 
 @pytest.fixture()
-def ns8_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeNS8Env:
+def ns8_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeNS8Env]:
     """Install isolated NS8 agent module & environment for a single test."""
-    fake = FakeNS8Env(tmp_path / "module_home")
+    saved_environ = dict(os.environ)
+    fake = FakeNS8Env(tmp_path / "module_home", monkeypatch=monkeypatch)
 
     if str(PYPKG_DIR) not in sys.path:
         monkeypatch.syspath_prepend(str(PYPKG_DIR))
@@ -215,6 +224,9 @@ def ns8_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeNS8Env:
         "LDAP_ADMIN_GROUP",
         "LDAP_EDITOR_GROUP",
         "LDAP_VIEWER_GROUP",
+        "LDAP_ADMIN_PRINCIPALS_B64",
+        "LDAP_EDITOR_PRINCIPALS_B64",
+        "LDAP_VIEWER_PRINCIPALS_B64",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -240,7 +252,15 @@ def ns8_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeNS8Env:
     monkeypatch.setitem(sys.modules, "agent", agent_mod)
     monkeypatch.setitem(sys.modules, "agent.tasks", tasks_mod)
     monkeypatch.setitem(sys.modules, "agent.ldapproxy", ldapproxy_mod)
-    return fake
+    try:
+        yield fake
+    finally:
+        for k in list(os.environ.keys()):
+            if k not in saved_environ:
+                os.environ.pop(k, None)
+        for k, v in saved_environ.items():
+            if os.environ.get(k) != v:
+                os.environ[k] = v
 
 
 def load_schema(schema_filename: str) -> dict[str, Any]:

@@ -31,6 +31,33 @@
       "type": "string",
       "maxLength": 512,
       "default": ""
+    },
+    "ldap_admin_principals": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    },
+    "ldap_editor_principals": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    },
+    "ldap_viewer_principals": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
     }
   }
 }

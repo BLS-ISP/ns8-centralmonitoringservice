@@ -426,6 +426,16 @@ def test_all_17_hub_actions_invoked_across_views() -> None:
                 },
                 "ldap_enabled": True,
                 "ldap_domain": "ad.msp.example.com",
+                "ldap_admin_principals": [
+                    "CN=Domain Admins,CN=Users,DC=ad,DC=msp,DC=example,DC=com",
+                    "CN=Genera,CN=Users,DC=ad,DC=msp,DC=example,DC=com",
+                ],
+                "ldap_editor_principals": [
+                    "CN=MSP Technicians,CN=Users,DC=ad,DC=msp,DC=example,DC=com"
+                ],
+                "ldap_viewer_principals": [
+                    "CN=MSP Viewers,CN=Users,DC=ad,DC=msp,DC=example,DC=com"
+                ],
                 "ldap_admin_group": "CN=Domain Admins,CN=Users,DC=ad,DC=msp,DC=example,DC=com",
                 "ldap_editor_group": "CN=MSP Technicians,CN=Users,DC=ad,DC=msp,DC=example,DC=com",
                 "ldap_viewer_group": "CN=MSP Viewers,CN=Users,DC=ad,DC=msp,DC=example,DC=com",
@@ -441,6 +451,12 @@ def test_all_17_hub_actions_invoked_across_views() -> None:
             {
                 "domain": "ad.bls-isp.net",
                 "username": "Genera",
+                "ldap_admin_principals": [
+                    "CN=Domain Admins,CN=Users,DC=ad,DC=bls-isp,DC=net",
+                    "CN=Genera,CN=Users,DC=ad,DC=bls-isp,DC=net",
+                ],
+                "ldap_editor_principals": [],
+                "ldap_viewer_principals": [],
                 "ldap_admin_group": "CN=Domain Admins,CN=Users,DC=ad,DC=bls-isp,DC=net",
                 "ldap_editor_group": "",
                 "ldap_viewer_group": "",
@@ -669,6 +685,15 @@ def test_view_payload_keys_match_input_schema_properties() -> None:
         assert f"{req_key}:" in settings_src, f"Settings.vue missing required key {req_key}"
     for s3_key in ("endpoint", "bucket", "region", "access_key", "secret_key", "secret_key_unchanged", "insecure", "path_style"):
         assert f"{s3_key}:" in settings_src, f"Settings.vue missing s3.{s3_key}"
+    for ldap_key in (
+        "ldap_admin_principals",
+        "ldap_editor_principals",
+        "ldap_viewer_principals",
+        "ldap_admin_group",
+        "ldap_editor_group",
+        "ldap_viewer_group",
+    ):
+        assert f"{ldap_key}:" in settings_src, f"Settings.vue missing {ldap_key}"
 
     tenants_src = (HUB_SRC_ROOT / "views" / "Tenants.vue").read_text(encoding="utf-8")
     save_tenant_schema = _load_schema("hub-save-tenant-input.json")
@@ -816,16 +841,33 @@ def test_extended_snmp_qnap_printer_and_roles_in_ui() -> None:
     )
 
 
-def test_v102_settings_ldap_discovery_viewer_role_and_user_tester() -> None:
-    """Verify v1.0.2 AD/LDAP live group discovery, Org-1-Viewer mapping, and interactive user tester."""
+def test_v104_settings_ldap_multiselect_groups_users_and_tester() -> None:
+    """Verify v1.0.4 AD/LDAP live group+user discovery, NsMultiSelect pickers, and interactive user tester."""
+    pkg_data = json.loads((HUB_UI_ROOT / "package.json").read_text(encoding="utf-8"))
+    cfg_data = json.loads((HUB_UI_ROOT / "public" / "config.json").read_text(encoding="utf-8"))
+    assert pkg_data["version"] == "1.0.4"
+    assert cfg_data["version"] == "1.0.4"
+
     settings_src = (HUB_SRC_ROOT / "views" / "Settings.vue").read_text(encoding="utf-8")
-    assert '"discover-ldap-groups"' in settings_src
-    assert '"test-ldap-user"' in settings_src
-    assert "ldap_viewer_group" in settings_src
-    assert "manualLdapDnMode" in settings_src
-    assert "normalizeGroupSelectionWithDiscovered" in settings_src
-    assert "member_of" in settings_src
-    assert "matched_role" in settings_src
+    for token in (
+        '"discover-ldap-groups"',
+        '"test-ldap-user"',
+        "<NsMultiSelect",
+        "ldap_admin_principals",
+        "ldap_editor_principals",
+        "ldap_viewer_principals",
+        "ldap_viewer_group",
+        "discoveredLdapGroups",
+        "discoveredLdapUsers",
+        "ldapOptionScope",
+        "ldapMultiSelectOptionsFor",
+        "normalizePrincipalsListWithDiscovered",
+        "acceptUserInput",
+        "showItemType",
+        "member_of",
+        "matched_role",
+    ):
+        assert token in settings_src, f"Settings.vue missing v1.0.4 token {token}"
 
     en_data = json.loads((HUB_UI_ROOT / "public" / "i18n" / "en" / "translation.json").read_text(encoding="utf-8"))
     de_data = json.loads((HUB_UI_ROOT / "public" / "i18n" / "de" / "translation.json").read_text(encoding="utf-8"))
@@ -833,6 +875,8 @@ def test_v102_settings_ldap_discovery_viewer_role_and_user_tester() -> None:
     de_helper = de_data["settings"]["ldap_editor_group_helper"]
     assert "denied" in en_helper.lower()
     assert "abgewiesen" in de_helper.lower()
+    assert "{users}" in en_data["settings"]["ldap_discovered_summary"]
+    assert "{users}" in de_data["settings"]["ldap_discovered_summary"]
 
     discover_out_schema = _load_schema("hub-discover-ldap-groups-output.json")
     jsonschema.validate(
@@ -848,9 +892,84 @@ def test_v102_settings_ldap_discovery_viewer_role_and_user_tester() -> None:
                     "description": "Designated administrators of the domain",
                 }
             ],
+            "users": [
+                {
+                    "username": "Genera",
+                    "display_name": "Genera Admin",
+                    "email": "genera@bls-isp.net",
+                    "dn": "CN=Genera,CN=Users,DC=ad,DC=bls-isp,DC=net",
+                }
+            ],
             "error": "",
         },
         schema=discover_out_schema,
+    )
+
+    get_cfg_out_schema = _load_schema("hub-get-configuration-output.json")
+    healthy_map = {
+        "hub_gateway": "healthy",
+        "prometheus": "healthy",
+        "loki": "healthy",
+        "grafana": "healthy",
+        "alertmanager": "healthy",
+        "prom_label_proxy": "healthy",
+        "blackbox_exporter": "healthy",
+        "snmp_exporter": "healthy",
+        "thanos_sidecar": "disabled",
+        "thanos_store": "disabled",
+        "thanos_query": "disabled",
+    }
+    jsonschema.validate(
+        instance={
+            "configured": True,
+            "host": "monitoring.msp.example.com",
+            "lets_encrypt": True,
+            "http2https": True,
+            "retention_days": 30,
+            "retention_size_gb": 50,
+            "loki_retention_days": 30,
+            "backup_include_tsdb": False,
+            "storage_mode": "local",
+            "s3": {
+                "endpoint": "",
+                "bucket": "",
+                "region": "us-east-1",
+                "access_key": "",
+                "has_secret_key": False,
+                "insecure": False,
+                "path_style": True,
+            },
+            "ldap_enabled": True,
+            "ldap_domain": "ad.bls-isp.net",
+            "ldap_admin_group": "CN=Domain Admins,CN=Users,DC=ad,DC=bls-isp,DC=net",
+            "ldap_editor_group": "",
+            "ldap_viewer_group": "",
+            "ldap_admin_principals": [
+                "CN=Domain Admins,CN=Users,DC=ad,DC=bls-isp,DC=net",
+                "CN=Genera,CN=Users,DC=ad,DC=bls-isp,DC=net",
+            ],
+            "ldap_editor_principals": [],
+            "ldap_viewer_principals": [],
+            "available_ldap_domains": ["ad.bls-isp.net"],
+            "has_grafana_admin_password": True,
+            "grafana_url": "https://monitoring.msp.example.com",
+            "ingest_metrics_url": "https://monitoring.msp.example.com/api/v1/ingest/metrics",
+            "ingest_logs_url": "https://monitoring.msp.example.com/api/v1/ingest/logs",
+            "health": {
+                "components": healthy_map,
+                "active_tenants_count": 3,
+                "active_targets_count": 12,
+                "firing_alerts_count": 0,
+                "active_silences_count": 1,
+                "storage_usage_bytes": {
+                    "prometheus_bytes": 1048576,
+                    "loki_bytes": 2097152,
+                    "grafana_bytes": 524288,
+                    "total_bytes": 3670016,
+                },
+            },
+        },
+        schema=get_cfg_out_schema,
     )
 
     test_user_out_schema = _load_schema("hub-test-ldap-user-output.json")

@@ -20,6 +20,9 @@
     "ldap_admin_group",
     "ldap_editor_group",
     "ldap_viewer_group",
+    "ldap_admin_principals",
+    "ldap_editor_principals",
+    "ldap_viewer_principals",
     "available_ldap_domains",
     "has_grafana_admin_password",
     "grafana_url",
@@ -65,6 +68,18 @@
     "ldap_admin_group": { "type": "string" },
     "ldap_editor_group": { "type": "string" },
     "ldap_viewer_group": { "type": "string" },
+    "ldap_admin_principals": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "ldap_editor_principals": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "ldap_viewer_principals": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
     "available_ldap_domains": {
       "type": "array",
       "items": { "type": "string" }

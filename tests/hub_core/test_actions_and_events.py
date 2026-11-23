@@ -493,3 +493,102 @@ def test_in_place_update_module_upgrades_gateway_image_rerenders_configs_and_res
     assert ns8_env.systemctl_state.get("central-monitoring-hub.service") == "active"
     assert ns8_env.systemctl_state.get("grafana.service") == "active"
     assert ns8_env.systemctl_state.get("hub-gateway.service") == "active"
+
+
+def test_v104_multi_principal_configure_read_and_update_module_backfill(
+    ns8_env: FakeNS8Env,
+) -> None:
+    from hub_core.env_store import decode_ldap_principals
+
+    execute_script(IMAGEROOT / "actions" / "create-module" / "20initialize")
+    assert decode_ldap_principals(
+        ns8_env.persisted_env,
+        "LDAP_ADMIN_PRINCIPALS_B64",
+        "LDAP_ADMIN_GROUP",
+    ) == ["Domain Admins"]
+    assert decode_ldap_principals(
+        ns8_env.persisted_env,
+        "LDAP_EDITOR_PRINCIPALS_B64",
+        "LDAP_EDITOR_GROUP",
+    ) == []
+
+    admin_principals = [
+        "CN=Domain Admins,CN=Users,DC=ad,DC=bls-isp,DC=net",
+        "CN=Genera,CN=Users,DC=ad,DC=bls-isp,DC=net",
+    ]
+    editor_principals = [
+        "CN=MSP-Engineers,OU=Groups,DC=ad,DC=bls-isp,DC=net",
+    ]
+    viewer_principals = [
+        "CN=MSP-Support,OU=Groups,DC=ad,DC=bls-isp,DC=net",
+        "CN=j.doe,CN=Users,DC=ad,DC=bls-isp,DC=net",
+    ]
+
+    rc_cfg, _, err_cfg = execute_script(
+        IMAGEROOT / "actions" / "configure-module" / "20configure",
+        payload={
+            "host": "monitoring.bls-isp.net",
+            "lets_encrypt": True,
+            "http2https": True,
+            "storage_mode": "local",
+            "ldap_enabled": True,
+            "ldap_domain": "ad.msp.example.com",
+            "ldap_admin_principals": admin_principals,
+            "ldap_editor_principals": editor_principals,
+            "ldap_viewer_principals": viewer_principals,
+        },
+    )
+    assert rc_cfg == 0, err_cfg
+    assert ns8_env.persisted_env["LDAP_ADMIN_GROUP"] == admin_principals[0]
+    assert ns8_env.persisted_env["LDAP_EDITOR_GROUP"] == editor_principals[0]
+    assert ns8_env.persisted_env["LDAP_VIEWER_GROUP"] == viewer_principals[0]
+
+    rc_read, out_read, err_read = execute_script(
+        IMAGEROOT / "actions" / "get-configuration" / "20read",
+        payload={},
+    )
+    assert rc_read == 0, err_read
+    doc = json.loads(out_read)
+    assert doc["ldap_admin_principals"] == admin_principals
+    assert doc["ldap_editor_principals"] == editor_principals
+    assert doc["ldap_viewer_principals"] == viewer_principals
+    assert doc["ldap_admin_group"] == admin_principals[0]
+    assert doc["ldap_editor_group"] == editor_principals[0]
+    assert doc["ldap_viewer_group"] == viewer_principals[0]
+
+    # Simulate v1.0.3 -> v1.0.4 update-module backfill when *_PRINCIPALS_B64 keys do not exist yet
+    ns8_env.unset_env("LDAP_ADMIN_PRINCIPALS_B64")
+    ns8_env.unset_env("LDAP_EDITOR_PRINCIPALS_B64")
+    ns8_env.unset_env("LDAP_VIEWER_PRINCIPALS_B64")
+    ns8_env.set_env("LDAP_ADMIN_GROUP", "CN=LegacyAdmins,CN=Users,DC=ad,DC=bls-isp,DC=net")
+    ns8_env.set_env("LDAP_EDITOR_GROUP", "")
+    ns8_env.set_env("LDAP_VIEWER_GROUP", "CN=LegacyViewers,CN=Users,DC=ad,DC=bls-isp,DC=net")
+    ns8_env.dump_env()
+
+    rc_up, _, err_up = execute_script(IMAGEROOT / "update-module.d" / "20pull_images")
+    assert rc_up == 0, err_up
+    assert decode_ldap_principals(
+        ns8_env.persisted_env, "LDAP_ADMIN_PRINCIPALS_B64", "LDAP_ADMIN_GROUP"
+    ) == ["CN=LegacyAdmins,CN=Users,DC=ad,DC=bls-isp,DC=net"]
+    assert decode_ldap_principals(
+        ns8_env.persisted_env, "LDAP_EDITOR_PRINCIPALS_B64", "LDAP_EDITOR_GROUP"
+    ) == []
+    assert decode_ldap_principals(
+        ns8_env.persisted_env, "LDAP_VIEWER_PRINCIPALS_B64", "LDAP_VIEWER_GROUP"
+    ) == ["CN=LegacyViewers,CN=Users,DC=ad,DC=bls-isp,DC=net"]
+
+
+def test_v104_ns8_env_teardown_leaves_no_process_environ_leak() -> None:
+    import os
+
+    for leaked_key in (
+        "LDAP_ADMIN_PRINCIPALS_B64",
+        "LDAP_EDITOR_PRINCIPALS_B64",
+        "LDAP_VIEWER_PRINCIPALS_B64",
+        "LDAP_ADMIN_GROUP",
+        "LDAP_EDITOR_GROUP",
+        "LDAP_VIEWER_GROUP",
+        "GRAFANA_ADMIN_PASSWORD",
+        "PORTAL_ENCRYPTION_KEY",
+    ):
+        assert leaked_key not in os.environ, f"{leaked_key} leaked across pytest fixtures!"

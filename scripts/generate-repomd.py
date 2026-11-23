@@ -165,10 +165,10 @@ def normalize_semver_tag(raw_tag: str) -> tuple[str, bool, str]:
     """Return (ns8_semver_tag, is_testing, oci_image_tag)."""
     cleaned = raw_tag.strip()
     if not cleaned or cleaned in {"latest", "main", "master"}:
-        return "1.0.3", False, cleaned or "latest"
+        return "1.0.4", False, cleaned or "latest"
     semver = cleaned[1:] if cleaned.startswith("v") and len(cleaned) > 1 and cleaned[1].isdigit() else cleaned
     if not re.match(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z", semver):
-        return "1.0.3", True, cleaned
+        return "1.0.4", True, cleaned
     is_testing = "-" in semver
     return semver, is_testing, semver
 
@@ -252,7 +252,7 @@ def generate_repository(
     *,
     root: Path = REPO_ROOT,
     org: str = "bls-isp",
-    tag: str = "1.0.3",
+    tag: str = "1.0.4",
     repo_name: str = "ns8-centralmonitoringservice",
     output_dir: Path,
     strict_assets: bool = False,
@@ -363,8 +363,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--tag",
-        default="1.0.3",
-        help="Release version tag to advertise in Software Center (e.g. 1.0.3 or v1.0.3).",
+        default="1.0.4",
+        help="Release version tag to advertise in Software Center (e.g. 1.0.4 or v1.0.4).",
     )
     parser.add_argument(
         "--repo-name",

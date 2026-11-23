@@ -169,6 +169,12 @@ def test_v102_ldap_discovery_tester_and_multi_user_portal_schemas() -> None:
             "ldap_admin_group": "CN=Domain Admins,CN=Users,DC=ad,DC=bls-isp,DC=net",
             "ldap_editor_group": "MSP Engineers",
             "ldap_viewer_group": long_ad_dn,
+            "ldap_admin_principals": [
+                "CN=Domain Admins,CN=Users,DC=ad,DC=bls-isp,DC=net",
+                "CN=Genera,CN=Users,DC=ad,DC=bls-isp,DC=net",
+            ],
+            "ldap_editor_principals": ["CN=MSP Engineers,OU=Groups,DC=ad,DC=bls-isp,DC=net"],
+            "ldap_viewer_principals": [long_ad_dn],
         },
         hub_cfg_in,
     )
@@ -191,6 +197,14 @@ def test_v102_ldap_discovery_tester_and_multi_user_portal_schemas() -> None:
                     "description": "Designated administrators of the domain",
                 }
             ],
+            "users": [
+                {
+                    "username": "Genera",
+                    "display_name": "Genera Admin",
+                    "email": "genera@bls-isp.net",
+                    "dn": "CN=Genera,CN=Users,DC=ad,DC=bls-isp,DC=net",
+                }
+            ],
             "error": "",
         },
         disc_out,
@@ -205,6 +219,9 @@ def test_v102_ldap_discovery_tester_and_multi_user_portal_schemas() -> None:
             "ldap_admin_group": "Domain Admins",
             "ldap_editor_group": "MSP Engineers",
             "ldap_viewer_group": long_ad_dn,
+            "ldap_admin_principals": ["CN=Domain Admins,CN=Users,DC=ad,DC=bls-isp,DC=net"],
+            "ldap_editor_principals": ["CN=MSP Engineers,OU=Groups,DC=ad,DC=bls-isp,DC=net"],
+            "ldap_viewer_principals": [long_ad_dn, "CN=Jane Doe,OU=Staff,DC=ad,DC=bls-isp,DC=net"],
         },
         test_ldap_in,
     )

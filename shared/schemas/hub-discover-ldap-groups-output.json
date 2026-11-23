@@ -3,7 +3,7 @@
   "$id": "https://nethserver.org/schemas/central-monitoring/hub-discover-ldap-groups-output.json",
   "title": "central-monitoring-hub discover-ldap-groups output",
   "type": "object",
-  "required": ["ok", "domain", "schema", "base_dn", "groups", "error"],
+  "required": ["ok", "domain", "schema", "base_dn", "groups", "users", "error"],
   "additionalProperties": false,
   "properties": {
     "ok": { "type": "boolean" },
@@ -23,6 +23,20 @@
           "name": { "type": "string" },
           "dn": { "type": "string" },
           "description": { "type": "string" }
+        }
+      }
+    },
+    "users": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["username", "display_name", "email", "dn"],
+        "additionalProperties": false,
+        "properties": {
+          "username": { "type": "string" },
+          "display_name": { "type": "string" },
+          "email": { "type": "string" },
+          "dn": { "type": "string" }
         }
       }
     },

@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from hub_core import ALL_COMPONENT_KEYS, resolve_state_dir
-from hub_core.env_store import build_urls, read_module_env, read_secrets
+from hub_core.env_store import (
+    build_urls,
+    decode_ldap_principals,
+    read_module_env,
+    read_secrets,
+)
 from hub_core.pod_http import pod_fetch_json
 
 COMPONENT_SERVICE_UNITS: dict[str, str] = {
@@ -254,6 +259,37 @@ def build_get_configuration_response(
         fetch_json=fetch_json,
     )
     storage_bytes = collect_storage_usage_bytes(sdir)
+    admin_principals = decode_ldap_principals(
+        env,
+        "LDAP_ADMIN_PRINCIPALS_B64",
+        "LDAP_ADMIN_GROUP",
+        default_fallback=["Domain Admins"],
+    )
+    editor_principals = decode_ldap_principals(
+        env,
+        "LDAP_EDITOR_PRINCIPALS_B64",
+        "LDAP_EDITOR_GROUP",
+        default_fallback=[],
+    )
+    viewer_principals = decode_ldap_principals(
+        env,
+        "LDAP_VIEWER_PRINCIPALS_B64",
+        "LDAP_VIEWER_GROUP",
+        default_fallback=[],
+    )
+    legacy_admin_group = (
+        env["LDAP_ADMIN_GROUP"]
+        if "LDAP_ADMIN_GROUP" in env
+        else (admin_principals[0] if admin_principals else "Domain Admins")
+    )
+    legacy_editor_group = env.get(
+        "LDAP_EDITOR_GROUP",
+        editor_principals[0] if editor_principals else "",
+    )
+    legacy_viewer_group = env.get(
+        "LDAP_VIEWER_GROUP",
+        viewer_principals[0] if viewer_principals else "",
+    )
 
     return {
         "configured": configured,
@@ -276,9 +312,12 @@ def build_get_configuration_response(
         },
         "ldap_enabled": env.get("LDAP_ENABLED", "false").lower() == "true",
         "ldap_domain": env.get("LDAP_DOMAIN", ""),
-        "ldap_admin_group": env.get("LDAP_ADMIN_GROUP", "Domain Admins"),
-        "ldap_editor_group": env.get("LDAP_EDITOR_GROUP", ""),
-        "ldap_viewer_group": env.get("LDAP_VIEWER_GROUP", ""),
+        "ldap_admin_group": legacy_admin_group,
+        "ldap_editor_group": legacy_editor_group,
+        "ldap_viewer_group": legacy_viewer_group,
+        "ldap_admin_principals": admin_principals,
+        "ldap_editor_principals": editor_principals,
+        "ldap_viewer_principals": viewer_principals,
         "available_ldap_domains": list_available_ldap_domains(),
         "has_grafana_admin_password": bool(secrets_map.get("GRAFANA_ADMIN_PASSWORD", "")),
         "grafana_url": urls["grafana_url"],

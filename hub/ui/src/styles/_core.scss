@@ -373,6 +373,21 @@
   flex: 1 1 16rem;
 }
 
+.ldap-scope-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.ldap-scope-bar__label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--cms-text-secondary);
+  margin-right: 0.25rem;
+}
+
 .portal-users-list {
   display: flex;
   flex-direction: column;

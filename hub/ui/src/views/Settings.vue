@@ -285,14 +285,18 @@
           </div>
 
           <p
-            v-if="discoveredLdapMeta.ok && discoveredLdapGroups.length"
+            v-if="
+              discoveredLdapMeta.ok &&
+              (discoveredLdapGroups.length > 0 || discoveredLdapUsers.length > 0)
+            "
             class="form-section-desc"
           >
             {{
               $t("settings.ldap_discovered_summary", {
                 schema: discoveredLdapMeta.schema || "ldap",
                 base_dn: discoveredLdapMeta.base_dn || "-",
-                count: discoveredLdapGroups.length,
+                groups: discoveredLdapGroups.length,
+                users: discoveredLdapUsers.length,
               })
             }}
           </p>
@@ -307,103 +311,115 @@
             class="mg-bottom-md"
           />
 
-          <NsToggle
-            v-if="discoveredLdapGroups.length > 0"
-            v-model="manualLdapDnMode"
-            :label="$t('settings.ldap_manual_dn_toggle')"
-            value="manualLdapDnMode"
-            :disabled="saving"
-          >
-            <template slot="text-left">{{ $t("common.no") }}</template>
-            <template slot="text-right">{{ $t("common.yes") }}</template>
-          </NsToggle>
-
-          <!-- Dropdown Selectors when groups discovered and not in manual mode -->
+          <!-- Quick Scope Filter Bar: All | Groups Only | Users Only -->
           <div
-            v-if="discoveredLdapGroups.length > 0 && !manualLdapDnMode"
-            class="mg-top-md"
+            v-if="discoveredLdapGroups.length > 0 || discoveredLdapUsers.length > 0"
+            class="ldap-scope-bar"
+            role="group"
+            :aria-label="$t('settings.ldap_scope_label')"
           >
-            <div class="form-grid-2 mg-bottom-md">
-              <cv-select
-                v-model="form.ldap_admin_group"
-                :label="$t('settings.ldap_admin_group_label')"
-                :disabled="saving"
-              >
-                <cv-select-option value="">
-                  {{ $t("settings.ldap_no_group_assigned") }}
-                </cv-select-option>
-                <cv-select-option
-                  v-for="grp in ldapGroupOptionsFor(form.ldap_admin_group)"
-                  :key="`admin-${grp.dn}`"
-                  :value="grp.dn"
-                >
-                  {{ formatLdapGroupOption(grp) }}
-                </cv-select-option>
-              </cv-select>
-
-              <cv-select
-                v-model="form.ldap_editor_group"
-                :label="$t('settings.ldap_editor_group_label')"
-                :disabled="saving"
-              >
-                <cv-select-option value="">
-                  {{ $t("settings.ldap_no_group_assigned") }}
-                </cv-select-option>
-                <cv-select-option
-                  v-for="grp in ldapGroupOptionsFor(form.ldap_editor_group)"
-                  :key="`editor-${grp.dn}`"
-                  :value="grp.dn"
-                >
-                  {{ formatLdapGroupOption(grp) }}
-                </cv-select-option>
-              </cv-select>
-            </div>
-
-            <cv-select
-              v-model="form.ldap_viewer_group"
-              :label="$t('settings.ldap_viewer_group_label')"
-              :disabled="saving"
+            <span class="ldap-scope-bar__label">
+              {{ $t("settings.ldap_scope_label") }}
+            </span>
+            <NsButton
+              :kind="ldapOptionScope === 'all' ? 'primary' : 'ghost'"
+              size="sm"
+              type="button"
+              @click="ldapOptionScope = 'all'"
             >
-              <cv-select-option value="">
-                {{ $t("settings.ldap_no_group_assigned") }}
-              </cv-select-option>
-              <cv-select-option
-                v-for="grp in ldapGroupOptionsFor(form.ldap_viewer_group)"
-                :key="`viewer-${grp.dn}`"
-                :value="grp.dn"
-              >
-                {{ formatLdapGroupOption(grp) }}
-              </cv-select-option>
-            </cv-select>
-
-            <p class="form-section-desc mg-top-md">
-              {{ $t("settings.ldap_editor_group_helper") }}
-            </p>
+              {{
+                $t("settings.ldap_scope_all", {
+                  count: discoveredLdapGroups.length + discoveredLdapUsers.length,
+                })
+              }}
+            </NsButton>
+            <NsButton
+              :kind="ldapOptionScope === 'groups' ? 'primary' : 'ghost'"
+              size="sm"
+              type="button"
+              @click="ldapOptionScope = 'groups'"
+            >
+              {{
+                $t("settings.ldap_scope_groups", {
+                  count: discoveredLdapGroups.length,
+                })
+              }}
+            </NsButton>
+            <NsButton
+              :kind="ldapOptionScope === 'users' ? 'primary' : 'ghost'"
+              size="sm"
+              type="button"
+              @click="ldapOptionScope = 'users'"
+            >
+              {{
+                $t("settings.ldap_scope_users", {
+                  count: discoveredLdapUsers.length,
+                })
+              }}
+            </NsButton>
           </div>
 
-          <!-- Manual DN / CN Inputs when no groups discovered or manual mode active -->
-          <div v-else class="mg-top-md">
-            <div class="form-grid-2">
-              <NsTextInput
-                v-model.trim="form.ldap_admin_group"
-                :label="$t('settings.ldap_admin_group_label')"
-                placeholder="CN=Domain Admins,CN=Users,DC=ad,DC=msp,DC=example,DC=com"
-                :disabled="saving"
-              />
+          <!-- 3 Multi-Select AD/LDAP Group + User Pickers -->
+          <div class="mg-bottom-md">
+            <NsMultiSelect
+              v-model="form.ldap_admin_principals"
+              :options="ldapMultiSelectOptionsFor(form.ldap_admin_principals)"
+              :title="$t('settings.ldap_admin_group_label')"
+              :label="$t('settings.ldap_multiselect_placeholder')"
+              :filterable="true"
+              :acceptUserInput="true"
+              :showSelectedItems="true"
+              :showItemType="true"
+              :maxDisplayOptions="500"
+              :marginBottomOnOpen="true"
+              :selectedLabel="$t('settings.ldap_selected_count_suffix')"
+              :userInputLabel="$t('settings.ldap_type_custom')"
+              :clearSelectionAriaLabel="$t('common.clear_search')"
+              :clearFilterLabel="$t('common.clear_search')"
+              :unselectAriaLabel="$t('common.delete')"
+              :disabled="saving"
+            />
+          </div>
 
-              <NsTextInput
-                v-model.trim="form.ldap_editor_group"
-                :label="$t('settings.ldap_editor_group_label')"
-                placeholder="CN=MSP Engineers,CN=Users,DC=ad,DC=msp,DC=example,DC=com"
-                :disabled="saving"
-              />
-            </div>
+          <div class="mg-bottom-md">
+            <NsMultiSelect
+              v-model="form.ldap_editor_principals"
+              :options="ldapMultiSelectOptionsFor(form.ldap_editor_principals)"
+              :title="$t('settings.ldap_editor_group_label')"
+              :label="$t('settings.ldap_multiselect_placeholder')"
+              :filterable="true"
+              :acceptUserInput="true"
+              :showSelectedItems="true"
+              :showItemType="true"
+              :maxDisplayOptions="500"
+              :marginBottomOnOpen="true"
+              :selectedLabel="$t('settings.ldap_selected_count_suffix')"
+              :userInputLabel="$t('settings.ldap_type_custom')"
+              :clearSelectionAriaLabel="$t('common.clear_search')"
+              :clearFilterLabel="$t('common.clear_search')"
+              :unselectAriaLabel="$t('common.delete')"
+              :disabled="saving"
+            />
+          </div>
 
-            <NsTextInput
-              v-model.trim="form.ldap_viewer_group"
-              :label="$t('settings.ldap_viewer_group_label')"
-              :helper-text="$t('settings.ldap_editor_group_helper')"
-              placeholder="CN=MSP ReadOnly,CN=Users,DC=ad,DC=msp,DC=example,DC=com"
+          <div class="mg-bottom-md">
+            <NsMultiSelect
+              v-model="form.ldap_viewer_principals"
+              :options="ldapMultiSelectOptionsFor(form.ldap_viewer_principals)"
+              :title="$t('settings.ldap_viewer_group_label')"
+              :label="$t('settings.ldap_multiselect_placeholder')"
+              :helperText="$t('settings.ldap_editor_group_helper')"
+              :filterable="true"
+              :acceptUserInput="true"
+              :showSelectedItems="true"
+              :showItemType="true"
+              :maxDisplayOptions="500"
+              :marginBottomOnOpen="true"
+              :selectedLabel="$t('settings.ldap_selected_count_suffix')"
+              :userInputLabel="$t('settings.ldap_type_custom')"
+              :clearSelectionAriaLabel="$t('common.clear_search')"
+              :clearFilterLabel="$t('common.clear_search')"
+              :unselectAriaLabel="$t('common.delete')"
               :disabled="saving"
             />
           </div>
@@ -418,6 +434,29 @@
             </p>
 
             <div class="ldap-test-row">
+              <div
+                v-if="discoveredLdapUsers.length > 0"
+                class="ldap-test-row__input"
+              >
+                <cv-select
+                  v-model="ldapQuickUserSelect"
+                  :label="$t('settings.ldap_test_quick_pick_label')"
+                  :disabled="saving || testingLdapUser"
+                  @change="onQuickSelectTestUser"
+                >
+                  <cv-select-option value="">
+                    {{ $t("settings.ldap_test_quick_pick_placeholder") }}
+                  </cv-select-option>
+                  <cv-select-option
+                    v-for="usr in discoveredLdapUsers"
+                    :key="`test-usr-${usr.dn}`"
+                    :value="usr.username"
+                  >
+                    {{ formatLdapUserSummary(usr) }}
+                  </cv-select-option>
+                </cv-select>
+              </div>
+
               <div class="ldap-test-row__input">
                 <NsTextInput
                   v-model.trim="ldapTestUsername"
@@ -428,6 +467,7 @@
                   @keydown.enter.prevent="runTestLdapUser"
                 />
               </div>
+
               <NsButton
                 kind="secondary"
                 size="field"
@@ -587,14 +627,16 @@ export default {
       saving: false,
       discoveringLdapGroups: false,
       testingLdapUser: false,
-      manualLdapDnMode: false,
+      ldapOptionScope: "all",
       discoveredLdapGroups: [],
+      discoveredLdapUsers: [],
       discoveredLdapMeta: {
         ok: false,
         schema: "",
         base_dn: "",
         error: "",
       },
+      ldapQuickUserSelect: "",
       ldapTestUsername: "",
       ldapTestValidationError: "",
       ldapTestResult: null,
@@ -628,9 +670,9 @@ export default {
         },
         ldap_enabled: false,
         ldap_domain: "",
-        ldap_admin_group: "Domain Admins",
-        ldap_editor_group: "",
-        ldap_viewer_group: "",
+        ldap_admin_principals: ["Domain Admins"],
+        ldap_editor_principals: [],
+        ldap_viewer_principals: [],
         grafana_admin_password: "",
       },
     };
@@ -688,50 +730,168 @@ export default {
         window.open(targetUrl, "_blank", "noopener,noreferrer");
       }
     },
-    formatLdapGroupOption(grp) {
-      if (!grp) {
+    formatLdapUserSummary(usr) {
+      if (!usr) {
         return "";
       }
-      if (grp.name && grp.dn && grp.name !== grp.dn) {
-        return `${grp.name} — ${grp.dn}`;
+      if (usr.display_name && usr.display_name !== usr.username) {
+        return `${usr.username} (${usr.display_name})`;
       }
-      return grp.dn || grp.name || "";
+      return usr.username || usr.dn || "";
     },
-    ldapGroupOptionsFor(currentValue) {
-      const val = (currentValue || "").trim();
+    buildGroupOption(grp) {
+      return {
+        name: "grp-" + grp.dn,
+        label: grp.name,
+        value: grp.dn,
+        type: this.$t("settings.ldap_type_group"),
+      };
+    },
+    buildUserOption(usr) {
+      const label =
+        usr.display_name && usr.display_name !== usr.username
+          ? usr.username + " (" + usr.display_name + ")"
+          : usr.username;
+      return {
+        name: "usr-" + usr.dn,
+        label,
+        value: usr.dn,
+        type: this.$t("settings.ldap_type_user"),
+      };
+    },
+    ldapMultiSelectOptionsFor(selectedList) {
+      const opts = [];
+      const seenValues = new Set();
+
+      if (this.ldapOptionScope === "all" || this.ldapOptionScope === "groups") {
+        this.discoveredLdapGroups.forEach((grp) => {
+          if (grp && grp.dn && !seenValues.has(grp.dn)) {
+            seenValues.add(grp.dn);
+            opts.push(this.buildGroupOption(grp));
+          }
+        });
+      }
+
+      if (this.ldapOptionScope === "all" || this.ldapOptionScope === "users") {
+        this.discoveredLdapUsers.forEach((usr) => {
+          if (usr && usr.dn && !seenValues.has(usr.dn)) {
+            seenValues.add(usr.dn);
+            opts.push(this.buildUserOption(usr));
+          }
+        });
+      }
+
+      // CRITICAL NsMultiSelect.vue safeguard: append fallback options for every currently selected value
+      const current = Array.isArray(selectedList) ? selectedList : [];
+      current.forEach((rawVal) => {
+        const val = String(rawVal || "").trim();
+        if (!val || seenValues.has(val)) {
+          return;
+        }
+        seenValues.add(val);
+        const matchedGrp = this.discoveredLdapGroups.find(
+          (g) => g && g.dn === val
+        );
+        if (matchedGrp) {
+          opts.push(this.buildGroupOption(matchedGrp));
+          return;
+        }
+        const matchedUsr = this.discoveredLdapUsers.find(
+          (u) => u && u.dn === val
+        );
+        if (matchedUsr) {
+          opts.push(this.buildUserOption(matchedUsr));
+          return;
+        }
+        opts.push({
+          name: val,
+          label: val,
+          value: val,
+          type: this.$t("settings.ldap_type_custom"),
+        });
+      });
+
+      return opts;
+    },
+    resolveSinglePrincipalWithDiscovered(rawValue) {
+      const val = String(rawValue || "").trim();
       if (!val) {
-        return this.discoveredLdapGroups;
+        return "";
       }
-      const exists = this.discoveredLdapGroups.some(
-        (g) => g.dn === val || g.name === val
+      const unprefixed = val.replace(/^(group|user):/i, "").trim();
+      const lower = unprefixed.toLowerCase();
+
+      const grpByDn = this.discoveredLdapGroups.find(
+        (g) => g && (g.dn || "").toLowerCase() === lower
       );
-      if (exists) {
-        return this.discoveredLdapGroups;
+      if (grpByDn) {
+        return grpByDn.dn;
       }
-      return [
-        { name: val, dn: val, description: "" },
-        ...this.discoveredLdapGroups,
-      ];
-    },
-    normalizeGroupSelectionWithDiscovered(rawValue) {
-      const val = (rawValue || "").trim();
-      if (!val || !this.discoveredLdapGroups.length) {
-        return val;
-      }
-      const lower = val.toLowerCase();
-      const byDn = this.discoveredLdapGroups.find(
-        (g) => (g.dn || "").toLowerCase() === lower
+      const usrByDn = this.discoveredLdapUsers.find(
+        (u) => u && (u.dn || "").toLowerCase() === lower
       );
-      if (byDn) {
-        return byDn.dn;
+      if (usrByDn) {
+        return usrByDn.dn;
       }
-      const byName = this.discoveredLdapGroups.find(
-        (g) => (g.name || "").toLowerCase() === lower
-      );
-      if (byName) {
-        return byName.dn;
+
+      if (!unprefixed.includes("=")) {
+        const grpByName = this.discoveredLdapGroups.find(
+          (g) => g && (g.name || "").toLowerCase() === lower
+        );
+        if (grpByName) {
+          return grpByName.dn;
+        }
+        const usrByName = this.discoveredLdapUsers.find(
+          (u) =>
+            u &&
+            ((u.username || "").toLowerCase() === lower ||
+              (u.display_name || "").toLowerCase() === lower ||
+              (u.email || "").toLowerCase() === lower)
+        );
+        if (usrByName) {
+          return usrByName.dn;
+        }
       }
+
       return val;
+    },
+    normalizePrincipalsListWithDiscovered(rawList) {
+      const items = Array.isArray(rawList) ? rawList : [];
+      const resolved = [];
+      const seenLower = new Set();
+      items.forEach((item) => {
+        const mapped = this.resolveSinglePrincipalWithDiscovered(item);
+        if (!mapped) {
+          return;
+        }
+        const key = mapped.toLowerCase();
+        if (!seenLower.has(key)) {
+          seenLower.add(key);
+          resolved.push(mapped);
+        }
+      });
+      return resolved;
+    },
+    cleanPrincipalsArray(arr) {
+      const out = [];
+      const seen = new Set();
+      (Array.isArray(arr) ? arr : []).forEach((raw) => {
+        const val = String(raw || "").trim().slice(0, 512);
+        if (!val) {
+          return;
+        }
+        const key = val.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push(val);
+        }
+      });
+      return out.slice(0, 200);
+    },
+    onQuickSelectTestUser() {
+      if (this.ldapQuickUserSelect) {
+        this.ldapTestUsername = this.ldapQuickUserSelect;
+      }
     },
     onLdapEnabledChange() {
       if (this.form.ldap_enabled) {
@@ -745,6 +905,7 @@ export default {
     },
     onLdapDomainChange() {
       this.ldapTestResult = null;
+      this.ldapQuickUserSelect = "";
       if (this.form.ldap_enabled && this.form.ldap_domain.trim()) {
         this.discoverLdapGroups();
       }
@@ -808,17 +969,22 @@ export default {
         error: out.ok ? "" : out.error || "",
       };
       this.discoveredLdapGroups = Array.isArray(out.groups) ? out.groups : [];
-      if (this.discoveredLdapGroups.length > 0) {
-        this.form.ldap_admin_group = this.normalizeGroupSelectionWithDiscovered(
-          this.form.ldap_admin_group
-        );
-        this.form.ldap_editor_group =
-          this.normalizeGroupSelectionWithDiscovered(
-            this.form.ldap_editor_group
+      this.discoveredLdapUsers = Array.isArray(out.users) ? out.users : [];
+      if (
+        this.discoveredLdapGroups.length > 0 ||
+        this.discoveredLdapUsers.length > 0
+      ) {
+        this.form.ldap_admin_principals =
+          this.normalizePrincipalsListWithDiscovered(
+            this.form.ldap_admin_principals
           );
-        this.form.ldap_viewer_group =
-          this.normalizeGroupSelectionWithDiscovered(
-            this.form.ldap_viewer_group
+        this.form.ldap_editor_principals =
+          this.normalizePrincipalsListWithDiscovered(
+            this.form.ldap_editor_principals
+          );
+        this.form.ldap_viewer_principals =
+          this.normalizePrincipalsListWithDiscovered(
+            this.form.ldap_viewer_principals
           );
       }
     },
@@ -839,14 +1005,27 @@ export default {
         return;
       }
 
+      const adminPrincipals = this.cleanPrincipalsArray(
+        this.form.ldap_admin_principals
+      );
+      const editorPrincipals = this.cleanPrincipalsArray(
+        this.form.ldap_editor_principals
+      );
+      const viewerPrincipals = this.cleanPrincipalsArray(
+        this.form.ldap_viewer_principals
+      );
+
       this.testingLdapUser = true;
       this.ldapTestResult = null;
       const payload = {
         domain,
         username,
-        ldap_admin_group: (this.form.ldap_admin_group || "").trim(),
-        ldap_editor_group: (this.form.ldap_editor_group || "").trim(),
-        ldap_viewer_group: (this.form.ldap_viewer_group || "").trim(),
+        ldap_admin_principals: adminPrincipals,
+        ldap_editor_principals: editorPrincipals,
+        ldap_viewer_principals: viewerPrincipals,
+        ldap_admin_group: adminPrincipals[0] || "",
+        ldap_editor_group: editorPrincipals[0] || "",
+        ldap_viewer_group: viewerPrincipals[0] || "",
       };
       const taskAction = "test-ldap-user";
       const eventId = this.getUuid();
@@ -935,6 +1114,24 @@ export default {
         this.$t("settings.cannot_retrieve_configuration")
       );
     },
+    extractPrincipalsFromConfig(arrField, legacyStr, defaultFallback) {
+      if (Array.isArray(arrField)) {
+        const cleaned = arrField
+          .map((v) => String(v || "").trim())
+          .filter(Boolean);
+        if (cleaned.length > 0) {
+          return cleaned;
+        }
+        if (typeof legacyStr === "string" && legacyStr.trim()) {
+          return [legacyStr.trim()];
+        }
+        return [];
+      }
+      if (typeof legacyStr === "string") {
+        return legacyStr.trim() ? [legacyStr.trim()] : [];
+      }
+      return defaultFallback;
+    },
     getConfigurationCompleted(taskContext, taskResult) {
       this.loading = false;
       const cfg = (taskResult && taskResult.output) || {};
@@ -978,12 +1175,21 @@ export default {
           (this.availableLdapDomains.length
             ? this.availableLdapDomains[0]
             : ""),
-        ldap_admin_group:
-          cfg.ldap_admin_group !== undefined
-            ? cfg.ldap_admin_group
-            : "Domain Admins",
-        ldap_editor_group: cfg.ldap_editor_group || "",
-        ldap_viewer_group: cfg.ldap_viewer_group || "",
+        ldap_admin_principals: this.extractPrincipalsFromConfig(
+          cfg.ldap_admin_principals,
+          cfg.ldap_admin_group,
+          ["Domain Admins"]
+        ),
+        ldap_editor_principals: this.extractPrincipalsFromConfig(
+          cfg.ldap_editor_principals,
+          cfg.ldap_editor_group,
+          []
+        ),
+        ldap_viewer_principals: this.extractPrincipalsFromConfig(
+          cfg.ldap_viewer_principals,
+          cfg.ldap_viewer_group,
+          []
+        ),
         grafana_admin_password: "",
       };
 
@@ -1053,6 +1259,16 @@ export default {
       const secretKeyUnchanged = Boolean(
         this.hasS3SecretKey && !this.form.s3.secret_key
       );
+      const adminPrincipals = this.cleanPrincipalsArray(
+        this.form.ldap_admin_principals
+      );
+      const editorPrincipals = this.cleanPrincipalsArray(
+        this.form.ldap_editor_principals
+      );
+      const viewerPrincipals = this.cleanPrincipalsArray(
+        this.form.ldap_viewer_principals
+      );
+
       return {
         host: this.form.host.trim().toLowerCase(),
         lets_encrypt: Boolean(this.form.lets_encrypt),
@@ -1074,9 +1290,12 @@ export default {
         },
         ldap_enabled: Boolean(this.form.ldap_enabled),
         ldap_domain: this.form.ldap_domain.trim(),
-        ldap_admin_group: this.form.ldap_admin_group.trim(),
-        ldap_editor_group: this.form.ldap_editor_group.trim(),
-        ldap_viewer_group: this.form.ldap_viewer_group.trim(),
+        ldap_admin_principals: adminPrincipals,
+        ldap_editor_principals: editorPrincipals,
+        ldap_viewer_principals: viewerPrincipals,
+        ldap_admin_group: adminPrincipals[0] || "",
+        ldap_editor_group: editorPrincipals[0] || "",
+        ldap_viewer_group: viewerPrincipals[0] || "",
         grafana_admin_password: this.form.grafana_admin_password || "",
       };
     },
