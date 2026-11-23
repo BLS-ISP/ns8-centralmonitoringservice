@@ -128,11 +128,15 @@ def test_arch10_snmp_config_includes_hc_octets_ifname_lookups_and_ups_load(tmp_p
     rendered = render_snmp_config([], tmp_path / "snmp.yml")
 
     mikrotik_block = rendered.split("  mikrotik:\n", 1)[1].split("  fortigate:\n", 1)[0]
+    assert "name: ifSpeed" in mikrotik_block
+    assert "name: ifHighSpeed" in mikrotik_block
     assert "name: ifHCInOctets" in mikrotik_block
     assert "name: ifHCOutOctets" in mikrotik_block
     assert "labelname: ifName" in mikrotik_block
 
-    fortigate_block = rendered.split("  fortigate:\n", 1)[1].split("  generic:\n", 1)[0]
+    fortigate_block = rendered.split("  fortigate:\n", 1)[1].split("  printer:\n", 1)[0]
+    assert "name: ifSpeed" in fortigate_block
+    assert "name: ifHighSpeed" in fortigate_block
     assert "name: ifHCInOctets" in fortigate_block
     assert "name: ifHCOutOctets" in fortigate_block
 

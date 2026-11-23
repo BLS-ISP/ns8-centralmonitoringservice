@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Detailed host telemetry for Linux (node_exporter / Alloy unix) and Windows Server (windows_exporter / Alloy windows) with Loki journald and EventLog streams.",
+  "description": "Detaillierte Systemanalyse für NethServer 8, Linux (node_exporter) und Windows Server (windows_exporter): CPU-Modi, Load vs. Kerne, RAM/Swap, Disk-Latenz/IOPS, Netzwerkfehler, Dienste und Host-Logs.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -30,7 +30,7 @@
         "ns8-central-monitoring"
       ],
       "targetBlank": false,
-      "title": "MSP Dashboards",
+      "title": "Monitoring-Ansichten",
       "type": "dashboards"
     }
   ],
@@ -45,7 +45,7 @@
       },
       "id": 1,
       "panels": [],
-      "title": "Linux & Windows Server Fleet Status",
+      "title": "Server-Status, Uptime, Systemdienste & Kernel-Gesundheit",
       "type": "row"
     },
     {
@@ -59,6 +59,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -78,7 +79,7 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
+        "w": 3,
         "x": 0,
         "y": 1
       },
@@ -104,14 +105,14 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "count(up{device_role=~\"linux|ns8\", customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} == 1) or vector(0)",
+          "expr": "count(up{customer=~\"$customer\", site=~\"$site\", device_role=~\"linux|ns8\", device_role=~\"$device_role\", instance=~\"$instance\"} == 1) or vector(0)",
           "legendFormat": "",
           "range": true,
           "instant": false,
           "refId": "A"
         }
       ],
-      "title": "Linux Servers Up",
+      "title": "Linux & NS8 Online",
       "type": "stat"
     },
     {
@@ -125,6 +126,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -144,8 +146,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 4,
+        "w": 3,
+        "x": 3,
         "y": 1
       },
       "id": 3,
@@ -170,14 +172,14 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "count(up{device_role=\"windows\", customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} == 1) or vector(0)",
+          "expr": "count(up{customer=~\"$customer\", site=~\"$site\", device_role=\"windows\", device_role=~\"$device_role\", instance=~\"$instance\"} == 1) or vector(0)",
           "legendFormat": "",
           "range": true,
           "instant": false,
           "refId": "A"
         }
       ],
-      "title": "Windows Servers Up",
+      "title": "Windows Online",
       "type": "stat"
     },
     {
@@ -191,6 +193,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -210,8 +213,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 8,
+        "w": 3,
+        "x": 6,
         "y": 1
       },
       "id": 4,
@@ -236,14 +239,14 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "count(up{device_role=~\"linux|windows|ns8\", customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} == 0) or vector(0)",
+          "expr": "count(up{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"} == 0) or vector(0)",
           "legendFormat": "",
           "range": true,
           "instant": false,
           "refId": "A"
         }
       ],
-      "title": "Hosts Unreachable",
+      "title": "Unerreichbar",
       "type": "stat"
     },
     {
@@ -257,32 +260,33 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "orange",
                 "value": null
               },
               {
-                "color": "orange",
-                "value": 1
+                "color": "green",
+                "value": 600
               }
             ]
           },
-          "unit": "none"
+          "unit": "s"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 4,
         "w": 4,
-        "x": 12,
+        "x": 9,
         "y": 1
       },
       "id": 5,
       "options": {
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
@@ -302,15 +306,16 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "count(node_systemd_unit_state{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", state=\"failed\"} == 1) or vector(0)",
+          "expr": "min((time() - (node_boot_time_seconds{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"} > 0)) or (time() - (windows_system_system_up_time{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"} > 0)) or (time() - (windows_os_boot_time_seconds{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"} > 0)))",
           "legendFormat": "",
           "range": true,
           "instant": false,
           "refId": "A"
         }
       ],
-      "title": "Failed Linux Systemd Units",
-      "type": "stat"
+      "title": "Kürzeste Uptime (Letzter Reboot)",
+      "type": "stat",
+      "description": "Zeit seit dem jüngsten Systemneustart unter den gefilterten Hosts."
     },
     {
       "datasource": {
@@ -323,6 +328,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -343,7 +349,7 @@
       "gridPos": {
         "h": 4,
         "w": 4,
-        "x": 16,
+        "x": 13,
         "y": 1
       },
       "id": 6,
@@ -368,14 +374,14 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "count((windows_service_start_mode{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", start_mode=\"auto\", name!~\"edgeupdate|gupdate|MapsBroker|sppsvc|RemoteRegistry|ShellHWDetection|WbioSrvc|TrustedInstaller|clr_optimization.*|CDPSvc\"} == 1) and on (customer, site, instance, name) (windows_service_state{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", state=\"stopped\"} == 1)) or vector(0)",
+          "expr": "count((max by (customer, site, instance, device_role, name) (node_systemd_unit_state{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", state=\"failed\"} == 1)) or (max by (customer, site, instance, device_role, name) (ns8_systemd_unit_failed{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"} == 1))) or vector(0)",
           "legendFormat": "",
           "range": true,
           "instant": false,
           "refId": "A"
         }
       ],
-      "title": "Stopped Auto Windows Services",
+      "title": "Fehlerhafte Linux-Units",
       "type": "stat"
     },
     {
@@ -389,6 +395,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -397,20 +404,19 @@
                 "value": null
               },
               {
-                "color": "red",
+                "color": "orange",
                 "value": 1
               }
             ]
           },
-          "unit": "none",
-          "decimals": 0
+          "unit": "none"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 4,
         "w": 4,
-        "x": 20,
+        "x": 17,
         "y": 1
       },
       "id": 7,
@@ -435,233 +441,15 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(increase(node_vmstat_oom_kill{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}[6h])) or vector(0)",
+          "expr": "count((windows_service_start_mode{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", start_mode=\"auto\", name!~\"edgeupdate|gupdate|MapsBroker|sppsvc|RemoteRegistry|ShellHWDetection|WbioSrvc|TrustedInstaller|clr_optimization.*|CDPSvc\"} == 1) and on (customer, site, instance, name) (windows_service_state{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", state=\"stopped\"} == 1)) or vector(0)",
           "legendFormat": "",
           "range": true,
           "instant": false,
           "refId": "A"
         }
       ],
-      "title": "Linux Kernel OOM Kills (6h)",
+      "title": "Gestoppte Windows-Autodienste",
       "type": "stat"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 5
-      },
-      "id": 8,
-      "panels": [],
-      "title": "Compute & Memory Utilization (Linux node_exporter + Windows windows_exporter)",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "drawStyle": "line",
-            "fillOpacity": 15,
-            "gradientMode": "opacity",
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "pointSize": 5,
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "percent",
-          "min": 0,
-          "max": 100
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 6
-      },
-      "id": 9,
-      "options": {
-        "legend": {
-          "calcs": [
-            "mean",
-            "max",
-            "lastNotNull"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "100 - (avg by (customer, site, instance) (rate(node_cpu_seconds_total{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", mode=\"idle\"}[5m])) * 100)",
-          "legendFormat": "[Linux] {{customer}}/{{site}} - {{instance}}",
-          "range": true,
-          "instant": false,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "100 - (avg by (customer, site, instance) (rate(windows_cpu_time_total{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", mode=\"idle\"}[5m])) * 100)",
-          "legendFormat": "[Win] {{customer}}/{{site}} - {{instance}}",
-          "range": true,
-          "instant": false,
-          "refId": "B"
-        }
-      ],
-      "title": "CPU Utilization (%) — Linux & Windows",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "drawStyle": "line",
-            "fillOpacity": 15,
-            "gradientMode": "opacity",
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "pointSize": 5,
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "percent",
-          "min": 0,
-          "max": 100
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 6
-      },
-      "id": 10,
-      "options": {
-        "legend": {
-          "calcs": [
-            "mean",
-            "max",
-            "lastNotNull"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "(1 - (node_memory_MemAvailable_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} / (node_memory_MemTotal_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} > 0))) * 100",
-          "legendFormat": "[Linux] {{customer}}/{{site}} - {{instance}}",
-          "range": true,
-          "instant": false,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "100 * (1 - (windows_memory_available_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} / ((windows_memory_physical_total_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} or windows_cs_physical_memory_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} or windows_os_visible_memory_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}) > 0)))",
-          "legendFormat": "[Win] {{customer}}/{{site}} - {{instance}}",
-          "range": true,
-          "instant": false,
-          "refId": "B"
-        }
-      ],
-      "title": "Memory Utilization (%) — Linux & Windows",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 14
-      },
-      "id": 11,
-      "panels": [],
-      "title": "Storage Capacity, Disk IOPS & Throughput",
-      "type": "row"
     },
     {
       "datasource": {
@@ -674,8 +462,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
-          "max": 100,
-          "min": 0,
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -684,32 +471,28 @@
                 "value": null
               },
               {
-                "color": "yellow",
-                "value": 85
-              },
-              {
                 "color": "red",
-                "value": 95
+                "value": 1
               }
             ]
           },
-          "unit": "percent"
+          "unit": "none",
+          "decimals": 0
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 15
+        "h": 4,
+        "w": 3,
+        "x": 21,
+        "y": 1
       },
-      "id": 12,
+      "id": 8,
       "options": {
-        "displayMode": "lcd",
-        "minVizHeight": 16,
-        "minVizWidth": 8,
-        "namePlacement": "auto",
-        "orientation": "horizontal",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -717,8 +500,7 @@
           "fields": "",
           "values": false
         },
-        "showUnfilled": true,
-        "valueMode": "color"
+        "textMode": "auto"
       },
       "targets": [
         {
@@ -727,27 +509,28 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(1 - (node_filesystem_avail_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", fstype!~\"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs\", mountpoint!~\"/run.*|/snap.*\"} / (node_filesystem_size_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", fstype!~\"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs\", mountpoint!~\"/run.*|/snap.*\"} > 0))) * 100",
-          "legendFormat": "{{instance}} {{mountpoint}}",
-          "range": false,
-          "instant": true,
+          "expr": "sum(increase(node_vmstat_oom_kill{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"}[24h])) or vector(0)",
+          "legendFormat": "",
+          "range": true,
+          "instant": false,
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "(1 - (windows_logical_disk_free_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", volume=~\"[A-Z]:\"} / (windows_logical_disk_size_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", volume=~\"[A-Z]:\"} > 0))) * 100",
-          "legendFormat": "{{instance}} {{volume}}",
-          "range": false,
-          "instant": true,
-          "refId": "B"
         }
       ],
-      "title": "Filesystem / Logical Volume Used (%)",
-      "type": "bargauge"
+      "title": "Kernel-OOM-Kills (24h)",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 9,
+      "panels": [],
+      "title": "CPU-Aufschlüsselung & System-Load vs. CPU-Kerne",
+      "type": "row"
     },
     {
       "datasource": {
@@ -787,23 +570,25 @@
               }
             ]
           },
-          "unit": "Bps"
+          "unit": "percent",
+          "min": 0,
+          "max": 100
         },
         "overrides": []
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 15
+        "w": 12,
+        "x": 0,
+        "y": 6
       },
-      "id": 13,
+      "id": 10,
       "options": {
         "legend": {
           "calcs": [
-            "mean",
+            "lastNotNull",
             "max",
-            "lastNotNull"
+            "mean"
           ],
           "displayMode": "table",
           "placement": "bottom",
@@ -821,8 +606,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (customer, site, instance) (rate(node_disk_read_bytes_total{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", device!~\"loop.*|ram.*|sr.*\"}[5m]))",
-          "legendFormat": "Read {{instance}}",
+          "expr": "avg by (customer, site, instance) (rate(node_cpu_seconds_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", mode=\"user\"}[5m])) * 100",
+          "legendFormat": "[Linux User] {{instance}}",
           "range": true,
           "instant": false,
           "refId": "A"
@@ -833,8 +618,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (customer, site, instance) (rate(node_disk_written_bytes_total{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", device!~\"loop.*|ram.*|sr.*\"}[5m]))",
-          "legendFormat": "Write {{instance}}",
+          "expr": "avg by (customer, site, instance) (rate(node_cpu_seconds_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", mode=\"system\"}[5m])) * 100",
+          "legendFormat": "[Linux System] {{instance}}",
           "range": true,
           "instant": false,
           "refId": "B"
@@ -845,8 +630,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (customer, site, instance) (rate(windows_logical_disk_read_bytes_total{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", volume=~\"[A-Z]:\"}[5m]))",
-          "legendFormat": "Read {{instance}}",
+          "expr": "avg by (customer, site, instance) (rate(node_cpu_seconds_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", mode=\"iowait\"}[5m])) * 100",
+          "legendFormat": "[Linux IOWait] {{instance}}",
           "range": true,
           "instant": false,
           "refId": "C"
@@ -857,14 +642,26 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (customer, site, instance) (rate(windows_logical_disk_write_bytes_total{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", volume=~\"[A-Z]:\"}[5m]))",
-          "legendFormat": "Write {{instance}}",
+          "expr": "avg by (customer, site, instance) (rate(node_cpu_seconds_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", mode=\"steal\"}[5m])) * 100",
+          "legendFormat": "[Linux Steal] {{instance}}",
           "range": true,
           "instant": false,
           "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "100 - (avg by (customer, site, instance) (rate(windows_cpu_time_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", mode=\"idle\"}[5m])) * 100)",
+          "legendFormat": "[Windows Gesamt] {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "E"
         }
       ],
-      "title": "Disk Read / Write Throughput (Bytes/s)",
+      "title": "CPU-Aufschlüsselung (User / System / IOWait / Steal & Windows CPU %)",
       "type": "timeseries"
     },
     {
@@ -905,23 +702,24 @@
               }
             ]
           },
-          "unit": "iops"
+          "unit": "short",
+          "min": 0
         },
         "overrides": []
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 15
+        "w": 12,
+        "x": 12,
+        "y": 6
       },
-      "id": 14,
+      "id": 11,
       "options": {
         "legend": {
           "calcs": [
-            "mean",
+            "lastNotNull",
             "max",
-            "lastNotNull"
+            "mean"
           ],
           "displayMode": "table",
           "placement": "bottom",
@@ -939,7 +737,716 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (customer, site, instance) (rate(node_disk_reads_completed_total{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", device!~\"loop.*|ram.*|sr.*\"}[5m]) + rate(node_disk_writes_completed_total{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", device!~\"loop.*|ram.*|sr.*\"}[5m]))",
+          "expr": "node_load1{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"}",
+          "legendFormat": "Load 1m {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "node_load5{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"}",
+          "legendFormat": "Load 5m {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "node_load15{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"}",
+          "legendFormat": "Load 15m {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "count by (customer, site, instance) (node_cpu_seconds_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", mode=\"idle\"})",
+          "legendFormat": "CPU-Kerne {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "windows_system_processor_queue_length{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"}",
+          "legendFormat": "Win Queue Length {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "E"
+        }
+      ],
+      "title": "System-Load (1m / 5m / 15m) vs. Verfügbare CPU-Kerne",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 12,
+      "panels": [],
+      "title": "Arbeitsspeicher-Aufschlüsselung & Dateisystem- / Laufwerkstabelle",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "opacity",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 11,
+        "x": 0,
+        "y": 15
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(node_memory_MemTotal_bytes{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"} - node_memory_MemAvailable_bytes{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"})",
+          "legendFormat": "[Linux Belegt] {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(node_memory_Buffers_bytes{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"} + node_memory_Cached_bytes{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"})",
+          "legendFormat": "[Linux Cache+Buffer] {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(node_memory_SwapTotal_bytes{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"} - node_memory_SwapFree_bytes{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"})",
+          "legendFormat": "[Linux Swap] {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "((windows_memory_physical_total_bytes{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"} or windows_cs_physical_memory_bytes{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"} or windows_os_visible_memory_bytes{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"}) - windows_memory_available_bytes{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"})",
+          "legendFormat": "[Windows Belegt] {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "D"
+        }
+      ],
+      "title": "RAM-Aufschlüsselung (Belegt / Cache+Buffer / Swap)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Kapazität"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Verfügbar"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Belegt %"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "mode": "gradient",
+                  "type": "gauge",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 85
+                    },
+                    {
+                      "color": "red",
+                      "value": 95
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 13,
+        "x": 11,
+        "y": 15
+      },
+      "id": 14,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Belegt %"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "label_replace(node_filesystem_size_bytes{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", fstype!~\"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs\", mountpoint!~\"/run.*|/snap.*|/var/lib/containers/storage/overlay.*\"}, \"vol\", \"$1\", \"mountpoint\", \"(.*)\") or label_replace(windows_logical_disk_size_bytes{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", volume=~\"[A-Z]:\"}, \"vol\", \"$1\", \"volume\", \"(.*)\")",
+          "legendFormat": "",
+          "range": false,
+          "instant": true,
+          "refId": "A",
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "label_replace(node_filesystem_avail_bytes{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", fstype!~\"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs\", mountpoint!~\"/run.*|/snap.*|/var/lib/containers/storage/overlay.*\"}, \"vol\", \"$1\", \"mountpoint\", \"(.*)\") or label_replace(windows_logical_disk_free_bytes{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", volume=~\"[A-Z]:\"}, \"vol\", \"$1\", \"volume\", \"(.*)\")",
+          "legendFormat": "",
+          "range": false,
+          "instant": true,
+          "refId": "B",
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "label_replace(((1 - (node_filesystem_avail_bytes{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", fstype!~\"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs\", mountpoint!~\"/run.*|/snap.*|/var/lib/containers/storage/overlay.*\"} / (node_filesystem_size_bytes{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", fstype!~\"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs\", mountpoint!~\"/run.*|/snap.*|/var/lib/containers/storage/overlay.*\"} > 0))) * 100), \"vol\", \"$1\", \"mountpoint\", \"(.*)\") or label_replace(((1 - (windows_logical_disk_free_bytes{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", volume=~\"[A-Z]:\"} / (windows_logical_disk_size_bytes{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", volume=~\"[A-Z]:\"} > 0))) * 100), \"vol\", \"$1\", \"volume\", \"(.*)\")",
+          "legendFormat": "",
+          "range": false,
+          "instant": true,
+          "refId": "C",
+          "format": "table"
+        }
+      ],
+      "title": "Dateisysteme & Logische Laufwerke (Kapazität, Frei & Füllbalken)",
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "collector_id": true,
+              "device": true,
+              "mountpoint": true,
+              "volume": true
+            },
+            "renameByName": {
+              "Value #A": "Kapazität",
+              "Value #B": "Verfügbar",
+              "Value #C": "Belegt %",
+              "customer": "Mandant",
+              "device_role": "Klasse",
+              "fstype": "Dateisystem",
+              "instance": "Host",
+              "site": "Standort",
+              "vol": "Mountpoint / Laufwerk"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "desc": true,
+                "field": "Belegt %"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 15,
+      "panels": [],
+      "title": "Storage-Performance — Disk-Latenz, Durchsatz & IOPS",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "opacity",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ms",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 25
+      },
+      "id": 16,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(rate(node_disk_read_time_seconds_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", device!~\"loop.*|ram.*|sr.*\"}[5m]) / (rate(node_disk_reads_completed_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", device!~\"loop.*|ram.*|sr.*\"}[5m]) > 0)) * 1000",
+          "legendFormat": "Lesen ms {{instance}} {{device}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(rate(node_disk_write_time_seconds_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", device!~\"loop.*|ram.*|sr.*\"}[5m]) / (rate(node_disk_writes_completed_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", device!~\"loop.*|ram.*|sr.*\"}[5m]) > 0)) * 1000",
+          "legendFormat": "Schreiben ms {{instance}} {{device}}",
+          "range": true,
+          "instant": false,
+          "refId": "B"
+        }
+      ],
+      "title": "Disk-Latenz pro Zugriff (ms Read / Write)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "opacity",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "Bps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 25
+      },
+      "id": 17,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (customer, site, instance) (rate(node_disk_read_bytes_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", device!~\"loop.*|ram.*|sr.*\"}[5m]))",
+          "legendFormat": "Lesen {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (customer, site, instance) (rate(node_disk_written_bytes_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", device!~\"loop.*|ram.*|sr.*\"}[5m]))",
+          "legendFormat": "Schreiben {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (customer, site, instance) (rate(windows_logical_disk_read_bytes_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", volume=~\"[A-Z]:\"}[5m]))",
+          "legendFormat": "Win Lesen {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (customer, site, instance) (rate(windows_logical_disk_write_bytes_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", volume=~\"[A-Z]:\"}[5m]))",
+          "legendFormat": "Win Schreiben {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "D"
+        }
+      ],
+      "title": "Disk-Durchsatz Lesen & Schreiben (Bytes/s)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "opacity",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "iops",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 25
+      },
+      "id": 18,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (customer, site, instance) (rate(node_disk_reads_completed_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", device!~\"loop.*|ram.*|sr.*\"}[5m]) + rate(node_disk_writes_completed_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", device!~\"loop.*|ram.*|sr.*\"}[5m]))",
           "legendFormat": "[Linux] {{instance}} IOPS",
           "range": true,
           "instant": false,
@@ -951,14 +1458,14 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (customer, site, instance) (rate(windows_logical_disk_reads_total{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", volume=~\"[A-Z]:\"}[5m]) + rate(windows_logical_disk_writes_total{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", volume=~\"[A-Z]:\"}[5m]))",
-          "legendFormat": "[Win] {{instance}} IOPS",
+          "expr": "sum by (customer, site, instance) (rate(windows_logical_disk_reads_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", volume=~\"[A-Z]:\"}[5m]) + rate(windows_logical_disk_writes_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", volume=~\"[A-Z]:\"}[5m]))",
+          "legendFormat": "[Windows] {{instance}} IOPS",
           "range": true,
           "instant": false,
           "refId": "B"
         }
       ],
-      "title": "Disk IOPS (Reads + Writes / sec)",
+      "title": "Disk-IOPS (Lese- + Schreiboperationen / s)",
       "type": "timeseries"
     },
     {
@@ -967,11 +1474,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 33
       },
-      "id": 15,
+      "id": 19,
       "panels": [],
-      "title": "Network Traffic & Failed Services",
+      "title": "Netzwerk-Durchsatz, Paketfehler & Gestörte Systemdienste",
       "type": "row"
     },
     {
@@ -1018,17 +1525,17 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
-        "y": 24
+        "y": 34
       },
-      "id": 16,
+      "id": 20,
       "options": {
         "legend": {
           "calcs": [
-            "mean",
+            "lastNotNull",
             "max",
-            "lastNotNull"
+            "mean"
           ],
           "displayMode": "table",
           "placement": "bottom",
@@ -1046,7 +1553,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (customer, site, instance) (rate(node_network_receive_bytes_total{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", device!~\"lo|veth.*|docker.*|br-.*|cni.*\"}[5m])) * 8",
+          "expr": "sum by (customer, site, instance) (rate(node_network_receive_bytes_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", device!~\"lo|veth.*|docker.*|br-.*|cni.*\"}[5m])) * 8",
           "legendFormat": "RX {{instance}}",
           "range": true,
           "instant": false,
@@ -1058,7 +1565,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (customer, site, instance) (rate(node_network_transmit_bytes_total{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", device!~\"lo|veth.*|docker.*|br-.*|cni.*\"}[5m])) * 8",
+          "expr": "sum by (customer, site, instance) (rate(node_network_transmit_bytes_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", device!~\"lo|veth.*|docker.*|br-.*|cni.*\"}[5m])) * 8",
           "legendFormat": "TX {{instance}}",
           "range": true,
           "instant": false,
@@ -1070,8 +1577,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (customer, site, instance) (rate(windows_net_bytes_received_total{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}[5m])) * 8",
-          "legendFormat": "RX {{instance}}",
+          "expr": "sum by (customer, site, instance) (rate(windows_net_bytes_received_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"}[5m])) * 8",
+          "legendFormat": "Win RX {{instance}}",
           "range": true,
           "instant": false,
           "refId": "C"
@@ -1082,14 +1589,121 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (customer, site, instance) (rate(windows_net_bytes_sent_total{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}[5m])) * 8",
-          "legendFormat": "TX {{instance}}",
+          "expr": "sum by (customer, site, instance) (rate(windows_net_bytes_sent_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"}[5m])) * 8",
+          "legendFormat": "Win TX {{instance}}",
           "range": true,
           "instant": false,
           "refId": "D"
         }
       ],
-      "title": "Network Throughput RX / TX (bits/s)",
+      "title": "Netzwerk-Durchsatz RX / TX (Bit/s)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "opacity",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "pps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 34
+      },
+      "id": 21,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (customer, site, instance) (rate(node_network_receive_errs_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", device!=\"lo\"}[5m]) + rate(node_network_transmit_errs_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", device!=\"lo\"}[5m]))",
+          "legendFormat": "Fehler/s {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (customer, site, instance) (rate(node_network_receive_drop_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", device!=\"lo\"}[5m]) + rate(node_network_transmit_drop_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", device!=\"lo\"}[5m]))",
+          "legendFormat": "Drops/s {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (customer, site, instance) (rate(windows_net_packets_received_errors_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"}[5m]) + rate(windows_net_packets_outbound_errors_total{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"}[5m]))",
+          "legendFormat": "Win Fehler/s {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "C"
+        }
+      ],
+      "title": "Netzwerk-Paketfehler & Drops (/s)",
       "type": "timeseries"
     },
     {
@@ -1124,11 +1738,11 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 24
+        "w": 8,
+        "x": 16,
+        "y": 34
       },
-      "id": 17,
+      "id": 22,
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -1148,7 +1762,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "node_systemd_unit_state{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", state=\"failed\"} == 1",
+          "expr": "(max by (customer, site, instance, device_role, name) (node_systemd_unit_state{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", state=\"failed\"} == 1)) or (max by (customer, site, instance, device_role, name) (ns8_systemd_unit_failed{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"} == 1))",
           "legendFormat": "",
           "range": false,
           "instant": true,
@@ -1161,7 +1775,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(windows_service_start_mode{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", start_mode=\"auto\", name!~\"edgeupdate|gupdate|MapsBroker|sppsvc|RemoteRegistry|ShellHWDetection|WbioSrvc|TrustedInstaller|clr_optimization.*|CDPSvc\"} == 1) and on (customer, site, instance, name) (windows_service_state{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", state=\"stopped\"} == 1)",
+          "expr": "(windows_service_start_mode{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", start_mode=\"auto\", name!~\"edgeupdate|gupdate|MapsBroker|sppsvc|RemoteRegistry|ShellHWDetection|WbioSrvc|TrustedInstaller|clr_optimization.*|CDPSvc\"} == 1) and on (customer, site, instance, name) (windows_service_state{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\", state=\"stopped\"} == 1)",
           "legendFormat": "",
           "range": false,
           "instant": true,
@@ -1169,7 +1783,7 @@
           "format": "table"
         }
       ],
-      "title": "Failed Linux Systemd Units & Stopped Windows Auto Services",
+      "title": "Fehlgeschlagene Linux-Systemd-Units & Gestoppte Windows-Autodienste",
       "transformations": [
         {
           "id": "merge",
@@ -1187,11 +1801,11 @@
               "collector_id": true
             },
             "renameByName": {
-              "customer": "Customer",
+              "customer": "Mandant",
               "device_role": "OS",
               "instance": "Host",
-              "name": "Service / Unit",
-              "site": "Site"
+              "name": "Dienst / Unit",
+              "site": "Standort"
             }
           }
         }
@@ -1204,11 +1818,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 42
       },
-      "id": 18,
+      "id": 23,
       "panels": [],
-      "title": "Host System & Event Logs (Loki — Journald & Windows EventLog)",
+      "title": "Host-System- & Event-Logs (Loki — Journald & Windows EventLog)",
       "type": "row"
     },
     {
@@ -1224,9 +1838,9 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 33
+        "y": 43
       },
-      "id": 19,
+      "id": 24,
       "options": {
         "dedupStrategy": "none",
         "enableLogDetails": true,
@@ -1244,12 +1858,12 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "{customer=~\"$customer\", site=~\"$site\", device_role=~\"linux|windows|ns8\", instance=~\"$instance\"}",
+          "expr": "{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\", instance=~\"$instance\"}",
           "queryType": "range",
           "refId": "A"
         }
       ],
-      "title": "Linux Journald & Windows Event Logs",
+      "title": "Linux Journald & Windows Event-Logs",
       "type": "logs"
     }
   ],
@@ -1260,7 +1874,8 @@
     "msp",
     "linux",
     "windows",
-    "servers"
+    "servers",
+    "deep-dive"
   ],
   "templating": {
     "list": [
@@ -1280,10 +1895,10 @@
           "uid": "prometheus"
         },
         "definition": "label_values(up, customer)",
-        "description": "Mandant / Customer Tenant",
+        "description": "Mandanten-Filter (Tenant)",
         "hide": 0,
         "includeAll": true,
-        "label": "Customer",
+        "label": "Mandant",
         "multi": true,
         "name": "customer",
         "options": [],
@@ -1313,16 +1928,49 @@
           "uid": "prometheus"
         },
         "definition": "label_values(up{customer=~\"$customer\"}, site)",
-        "description": "Standort / Customer Site",
+        "description": "Standort-Filter (Site)",
         "hide": 0,
         "includeAll": true,
-        "label": "Site",
+        "label": "Standort",
         "multi": true,
         "name": "site",
         "options": [],
         "query": {
           "qryType": 1,
           "query": "label_values(up{customer=~\"$customer\"}, site)"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": "ns8|linux|windows",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(up{customer=~\"$customer\", site=~\"$site\", device_role=~\"ns8|linux|windows\"}, device_role)",
+        "description": "Filter nach ns8, linux oder windows",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Geräteklasse",
+        "multi": true,
+        "name": "device_role",
+        "options": [],
+        "query": {
+          "qryType": 1,
+          "query": "label_values(up{customer=~\"$customer\", site=~\"$site\", device_role=~\"ns8|linux|windows\"}, device_role)"
         },
         "refresh": 2,
         "regex": "",
@@ -1345,17 +1993,17 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "definition": "label_values(up{customer=~\"$customer\", site=~\"$site\", device_role=~\"linux|windows|ns8\"}, instance)",
-        "description": "Host / System Instance",
+        "definition": "label_values(up{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\"}, instance)",
+        "description": "Überwachter Linux-, NS8- oder Windows-Host",
         "hide": 0,
         "includeAll": true,
-        "label": "Instance",
+        "label": "Server / Host",
         "multi": true,
         "name": "instance",
         "options": [],
         "query": {
           "qryType": 1,
-          "query": "label_values(up{customer=~\"$customer\", site=~\"$site\", device_role=~\"linux|windows|ns8\"}, instance)"
+          "query": "label_values(up{customer=~\"$customer\", site=~\"$site\", device_role=~\"$device_role\"}, instance)"
         },
         "refresh": 2,
         "regex": "",
@@ -1371,8 +2019,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Linux & Windows Server Telemetry",
+  "title": "Linux- & Windows-Server Deep-Dive",
   "uid": "linux-windows-servers",
-  "version": 1,
+  "version": 2,
   "weekStart": "monday"
 }

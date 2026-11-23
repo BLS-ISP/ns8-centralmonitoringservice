@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import shutil
+import socket
 from pathlib import Path
 
 from hub_core import (
@@ -18,8 +18,16 @@ from hub_core.env_store import ensure_initial_secrets, read_module_env, read_sec
 from hub_core.storage_s3 import render_loki_storage_blocks, write_thanos_objstore_file
 
 
-def render_prometheus_yaml(module_id: str) -> str:
-    """Render /etc/prometheus/prometheus.yml supporting Remote Write, file_sd, and Thanos."""
+def render_prometheus_yaml(
+    module_id: str,
+    *,
+    monitor_local_ns8_node: bool = True,
+    local_node_customer: str = "_msp_internal",
+    local_node_site: str = "hub",
+    node_instance: str = "",
+) -> str:
+    """Render /etc/prometheus/prometheus.yml supporting Remote Write, file_sd, Thanos, and Hub self-monitoring."""
+    resolved_instance = (node_instance or "").strip() or module_id
     lines = [
         "global:",
         "  scrape_interval: 30s",
@@ -50,49 +58,71 @@ def render_prometheus_yaml(module_id: str) -> str:
         '          device_role: "ns8"',
         '          collector_id: "hub-central"',
         "",
-        "  - job_name: central-exporters",
-        "    file_sd_configs:",
-        "      - files:",
-        '          - "/etc/prometheus/file_sd/exporters/*.json"',
-        "        refresh_interval: 30s",
-        "",
-        "  - job_name: central-blackbox",
-        "    metrics_path: /probe",
-        "    file_sd_configs:",
-        "      - files:",
-        '          - "/etc/prometheus/file_sd/blackbox/*.json"',
-        "        refresh_interval: 30s",
-        "    relabel_configs:",
-        "      - source_labels: [blackbox_module]",
-        "        regex: (.+)",
-        "        target_label: __param_module",
-        "      - source_labels: [__address__]",
-        "        target_label: __param_target",
-        "      - source_labels: [__param_target]",
-        "        target_label: instance",
-        "      - target_label: __address__",
-        "        replacement: 127.0.0.1:9115",
-        "",
-        "  - job_name: central-snmp",
-        "    metrics_path: /snmp",
-        "    file_sd_configs:",
-        "      - files:",
-        '          - "/etc/prometheus/file_sd/snmp/*.json"',
-        "        refresh_interval: 30s",
-        "    relabel_configs:",
-        "      - source_labels: [snmp_module]",
-        "        regex: (.+)",
-        "        target_label: __param_module",
-        "      - source_labels: [snmp_auth]",
-        "        regex: (.+)",
-        "        target_label: __param_auth",
-        "      - source_labels: [__address__]",
-        "        target_label: __param_target",
-        "      - source_labels: [__param_target]",
-        "        target_label: instance",
-        "      - target_label: __address__",
-        "        replacement: 127.0.0.1:9116",
     ]
+
+    if monitor_local_ns8_node:
+        lines.extend(
+            [
+                "  - job_name: hub-ns8-node",
+                "    metrics_path: /metrics/ns8-node",
+                "    static_configs:",
+                '      - targets: ["127.0.0.1:9097"]',
+                "        labels:",
+                f"          customer: {yaml_quote(local_node_customer or '_msp_internal')}",
+                f"          site: {yaml_quote(local_node_site or 'hub')}",
+                f"          instance: {yaml_quote(resolved_instance)}",
+                '          device_role: "ns8"',
+                '          collector_id: "hub-local"',
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
+            "  - job_name: central-exporters",
+            "    file_sd_configs:",
+            "      - files:",
+            '          - "/etc/prometheus/file_sd/exporters/*.json"',
+            "        refresh_interval: 30s",
+            "",
+            "  - job_name: central-blackbox",
+            "    metrics_path: /probe",
+            "    file_sd_configs:",
+            "      - files:",
+            '          - "/etc/prometheus/file_sd/blackbox/*.json"',
+            "        refresh_interval: 30s",
+            "    relabel_configs:",
+            "      - source_labels: [blackbox_module]",
+            "        regex: (.+)",
+            "        target_label: __param_module",
+            "      - source_labels: [__address__]",
+            "        target_label: __param_target",
+            "      - source_labels: [__param_target]",
+            "        target_label: instance",
+            "      - target_label: __address__",
+            "        replacement: 127.0.0.1:9115",
+            "",
+            "  - job_name: central-snmp",
+            "    metrics_path: /snmp",
+            "    file_sd_configs:",
+            "      - files:",
+            '          - "/etc/prometheus/file_sd/snmp/*.json"',
+            "        refresh_interval: 30s",
+            "    relabel_configs:",
+            "      - source_labels: [snmp_module]",
+            "        regex: (.+)",
+            "        target_label: __param_module",
+            "      - source_labels: [snmp_auth]",
+            "        regex: (.+)",
+            "        target_label: __param_auth",
+            "      - source_labels: [__address__]",
+            "        target_label: __param_target",
+            "      - source_labels: [__param_target]",
+            "        target_label: instance",
+            "      - target_label: __address__",
+            "        replacement: 127.0.0.1:9116",
+        ]
+    )
     return "\n".join(lines) + "\n"
 
 
@@ -272,25 +302,30 @@ def _ensure_bootstrap_auxiliary_configs(config_dir: Path, shared_dir: Path) -> N
     if src_rules_dir.is_dir():
         existing_active = list(active_rules_dir.glob("*.yml"))
         for rule_file in sorted(src_rules_dir.glob("*.yml")):
+            rule_text = rule_file.read_text(encoding="utf-8")
             atomic_write_text(
                 avail_rules_dir / rule_file.name,
-                rule_file.read_text(encoding="utf-8"),
+                rule_text,
                 mode=0o644,
             )
-            if not existing_active:
+            if not existing_active or (active_rules_dir / rule_file.name).is_file():
                 atomic_write_text(
                     active_rules_dir / rule_file.name,
-                    rule_file.read_text(encoding="utf-8"),
+                    rule_text,
                     mode=0o644,
                 )
 
-    # Copy starter dashboards & provisioning descriptor
+    # Copy all starter dashboards & provisioning descriptor atomically
     dashboards_dst = config_dir / "grafana" / "dashboards"
     dashboards_dst.mkdir(parents=True, exist_ok=True)
     src_dashboards = shared_dir / "dashboards"
     if src_dashboards.is_dir():
         for dash_file in sorted(src_dashboards.glob("*.json")):
-            shutil.copyfile(dash_file, dashboards_dst / dash_file.name)
+            atomic_write_text(
+                dashboards_dst / dash_file.name,
+                dash_file.read_text(encoding="utf-8"),
+                mode=0o644,
+            )
 
     dash_prov = config_dir / "grafana" / "provisioning" / "dashboards" / "starter-dashboards.yaml"
     atomic_write_text(
@@ -443,8 +478,28 @@ def render_all_configs(state_dir: str | Path | None = None) -> dict[str, Path]:
     s3_insecure = env.get("S3_INSECURE", "false").lower() == "true"
     s3_path_style = env.get("S3_PATH_STYLE", "true").lower() == "true"
 
+    monitor_local_ns8_node = env.get("MONITOR_LOCAL_NS8_NODE", "true").lower() == "true"
+    local_node_customer = env.get("LOCAL_NODE_CUSTOMER", "_msp_internal") or "_msp_internal"
+    local_node_site = env.get("LOCAL_NODE_SITE", "hub") or "hub"
+    raw_hostname = socket.gethostname().strip()
+    node_instance = (
+        env.get("NODE_HOSTNAME", "").strip()
+        or host.strip()
+        or (raw_hostname if raw_hostname and raw_hostname != "localhost" else module_id)
+    )
+
     prom_path = cdir / "prometheus" / "prometheus.yml"
-    atomic_write_text(prom_path, render_prometheus_yaml(module_id), mode=0o640)
+    atomic_write_text(
+        prom_path,
+        render_prometheus_yaml(
+            module_id,
+            monitor_local_ns8_node=monitor_local_ns8_node,
+            local_node_customer=local_node_customer,
+            local_node_site=local_node_site,
+            node_instance=node_instance,
+        ),
+        mode=0o640,
+    )
 
     loki_path = cdir / "loki" / "loki.yaml"
     atomic_write_text(

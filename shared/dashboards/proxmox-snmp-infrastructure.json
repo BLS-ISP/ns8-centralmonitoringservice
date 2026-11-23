@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Virtualization (Proxmox VE pve_exporter), SNMP Switches/Firewalls (IF-MIB), UPS battery/runtime, NAS RAID/disk health, and Syslog streams.",
+  "description": "Infrastruktur-Monitoring für Proxmox VE Cluster/VMs/Storages, SNMP-Switches & Firewalls (IF-MIB), USV-Stützzeit/Last, Synology/QNAP-NAS, RFC-3805-Netzwerkdrucker und Syslog.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -30,7 +30,7 @@
         "ns8-central-monitoring"
       ],
       "targetBlank": false,
-      "title": "MSP Dashboards",
+      "title": "Monitoring-Ansichten",
       "type": "dashboards"
     }
   ],
@@ -45,7 +45,7 @@
       },
       "id": 1,
       "panels": [],
-      "title": "Proxmox VE Virtualization & SNMP Infrastructure Overview",
+      "title": "Proxmox VE Virtualisierung & SNMP-Infrastruktur — KPIs",
       "type": "row"
     },
     {
@@ -58,7 +58,91 @@
           "color": {
             "mode": "thresholds"
           },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "index": 0,
+                  "text": "KEIN QUORUM"
+                },
+                "1": {
+                  "color": "green",
+                  "index": 1,
+                  "text": "QUORATE"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "min(pve_up{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", id=~\"cluster/.*\"} or pve_cluster_quorate{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}) or vector(1)",
+          "legendFormat": "",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Proxmox Quorum",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -78,11 +162,11 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 0,
+        "w": 3,
+        "x": 3,
         "y": 1
       },
-      "id": 2,
+      "id": 3,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -111,7 +195,7 @@
           "refId": "A"
         }
       ],
-      "title": "Proxmox Nodes Online",
+      "title": "Proxmox-Knoten Online",
       "type": "stat"
     },
     {
@@ -125,6 +209,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -144,11 +229,11 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 4,
+        "w": 3,
+        "x": 6,
         "y": 1
       },
-      "id": 3,
+      "id": 4,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -177,7 +262,7 @@
           "refId": "A"
         }
       ],
-      "title": "Running VMs & LXCs",
+      "title": "Laufende VMs & LXCs",
       "type": "stat"
     },
     {
@@ -191,6 +276,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -210,11 +296,11 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 8,
+        "w": 3,
+        "x": 9,
         "y": 1
       },
-      "id": 4,
+      "id": 5,
       "options": {
         "colorMode": "background",
         "graphMode": "area",
@@ -243,7 +329,7 @@
           "refId": "A"
         }
       ],
-      "title": "Stopped Auto-Start Guests",
+      "title": "Gestoppte Auto-Start-Gäste",
       "type": "stat"
     },
     {
@@ -257,6 +343,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -276,11 +363,11 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
+        "w": 3,
         "x": 12,
         "y": 1
       },
-      "id": 5,
+      "id": 6,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -309,7 +396,7 @@
           "refId": "A"
         }
       ],
-      "title": "SNMP Devices Online",
+      "title": "SNMP-Geräte Online",
       "type": "stat"
     },
     {
@@ -323,6 +410,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -342,11 +430,11 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 16,
+        "w": 3,
+        "x": 15,
         "y": 1
       },
-      "id": 6,
+      "id": 7,
       "options": {
         "colorMode": "background",
         "graphMode": "area",
@@ -368,14 +456,14 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "count((upsOutputSource{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} == 5) or (upsBasicOutputStatus{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} == 3)) or vector(0)",
+          "expr": "count((upsOutputSource{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} == 5) or (upsBasicOutputStatus{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} == 3) or (upsBatteryStatus{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} == 3)) or vector(0)",
           "legendFormat": "",
           "range": true,
           "instant": false,
           "refId": "A"
         }
       ],
-      "title": "UPS Systems On Battery",
+      "title": "USV auf Batterie",
       "type": "stat"
     },
     {
@@ -389,6 +477,79 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "-",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 15
+              },
+              {
+                "color": "green",
+                "value": 30
+              }
+            ]
+          },
+          "unit": "m",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 1
+      },
+      "id": 8,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "min(upsEstimatedMinutesRemaining{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"})",
+          "legendFormat": "",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "title": "USV Min. Stützzeit",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -408,11 +569,11 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 20,
+        "w": 3,
+        "x": 21,
         "y": 1
       },
-      "id": 7,
+      "id": 9,
       "options": {
         "colorMode": "background",
         "graphMode": "area",
@@ -441,7 +602,7 @@
           "refId": "A"
         }
       ],
-      "title": "NAS Degraded Volumes",
+      "title": "Degradierte NAS-Volumes",
       "type": "stat"
     },
     {
@@ -452,9 +613,9 @@
         "x": 0,
         "y": 5
       },
-      "id": 8,
+      "id": 10,
       "panels": [],
-      "title": "Proxmox VE Nodes, Storages & Virtual Machines",
+      "title": "Proxmox VE Hypervisor-Ressourcen & Storage-Pools",
       "type": "row"
     },
     {
@@ -507,13 +668,13 @@
         "x": 0,
         "y": 6
       },
-      "id": 9,
+      "id": 11,
       "options": {
         "legend": {
           "calcs": [
-            "mean",
+            "lastNotNull",
             "max",
-            "lastNotNull"
+            "mean"
           ],
           "displayMode": "table",
           "placement": "bottom",
@@ -532,7 +693,7 @@
           },
           "editorMode": "code",
           "expr": "pve_cpu_usage_ratio{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", id=~\"node/.*\"} * 100",
-          "legendFormat": "CPU {{customer}}/{{site}} {{id}}",
+          "legendFormat": "CPU {{site}} {{id}}",
           "range": true,
           "instant": false,
           "refId": "A"
@@ -544,13 +705,97 @@
           },
           "editorMode": "code",
           "expr": "pve_iowait_ratio{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", id=~\"node/.*\"} * 100",
-          "legendFormat": "IOWait {{customer}}/{{site}} {{id}}",
+          "legendFormat": "IO-Wait {{site}} {{id}}",
           "range": true,
           "instant": false,
           "refId": "B"
         }
       ],
-      "title": "Proxmox Hypervisor CPU & IO-Wait (%)",
+      "title": "Hypervisor CPU-Last & IO-Wait (%)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "opacity",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 6
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(pve_memory_usage_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", id=~\"node/.*\"} / (pve_memory_size_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", id=~\"node/.*\"} > 0)) * 100",
+          "legendFormat": "RAM % {{site}} {{id}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Hypervisor RAM-Auslastung (%)",
       "type": "timeseries"
     },
     {
@@ -563,9 +808,217 @@
           "color": {
             "mode": "thresholds"
           },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
           "mappings": [],
-          "max": 100,
-          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Gesamt"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Belegt"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Füllstand %"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "mode": "gradient",
+                  "type": "gauge",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 85
+                    },
+                    {
+                      "color": "red",
+                      "value": 95
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 6
+      },
+      "id": 13,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "pve_disk_size_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", id=~\"storage/.*\"}",
+          "legendFormat": "",
+          "range": false,
+          "instant": true,
+          "refId": "A",
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "pve_disk_usage_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", id=~\"storage/.*\"}",
+          "legendFormat": "",
+          "range": false,
+          "instant": true,
+          "refId": "B",
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(pve_disk_usage_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", id=~\"storage/.*\"} / (pve_disk_size_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", id=~\"storage/.*\"} > 0)) * 100",
+          "legendFormat": "",
+          "range": false,
+          "instant": true,
+          "refId": "C",
+          "format": "table"
+        }
+      ],
+      "title": "Proxmox Storage-Pool-Tabelle (Kapazität & Füllbalken)",
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "collector_id": true,
+              "device_role": true,
+              "instance": true
+            },
+            "renameByName": {
+              "Value #A": "Gesamt",
+              "Value #B": "Belegt",
+              "Value #C": "Füllstand %",
+              "customer": "Mandant",
+              "id": "Storage-Pool",
+              "site": "Standort"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 14,
+      "panels": [],
+      "title": "Proxmox Top-10 VMs & LXCs + Gast-Statusmatrix",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -575,7 +1028,7 @@
               },
               {
                 "color": "yellow",
-                "value": 85
+                "value": 80
               },
               {
                 "color": "red",
@@ -583,19 +1036,21 @@
               }
             ]
           },
-          "unit": "percent"
+          "unit": "percent",
+          "min": 0,
+          "max": 100
         },
         "overrides": []
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 6
+        "w": 7,
+        "x": 0,
+        "y": 15
       },
-      "id": 10,
+      "id": 15,
       "options": {
-        "displayMode": "lcd",
+        "displayMode": "gradient",
         "minVizHeight": 16,
         "minVizWidth": 8,
         "namePlacement": "auto",
@@ -617,14 +1072,87 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(pve_disk_usage_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", id=~\"storage/.*\"} / (pve_disk_size_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", id=~\"storage/.*\"} > 0)) * 100",
+          "expr": "topk(10, pve_cpu_usage_ratio{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", id=~\"(qemu|lxc)/.*\"} * 100)",
           "legendFormat": "{{site}} {{id}}",
           "range": false,
           "instant": true,
           "refId": "A"
         }
       ],
-      "title": "Proxmox Storage Pool Usage (%)",
+      "title": "Top-10 VMs & LXCs nach CPU-Last (%)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 8589934592
+              },
+              {
+                "color": "red",
+                "value": 17179869184
+              }
+            ]
+          },
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 7,
+        "x": 7,
+        "y": 15
+      },
+      "id": 16,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "valueMode": "color"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "topk(10, pve_memory_usage_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", id=~\"(qemu|lxc)/.*\"})",
+          "legendFormat": "{{site}} {{id}}",
+          "range": false,
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Top-10 VMs & LXCs nach RAM-Belegung",
       "type": "bargauge"
     },
     {
@@ -659,7 +1187,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Up"
+              "options": "Status"
             },
             "properties": [
               {
@@ -676,12 +1204,12 @@
                       "0": {
                         "color": "red",
                         "index": 0,
-                        "text": "STOPPED"
+                        "text": "GESTOPPT"
                       },
                       "1": {
                         "color": "green",
                         "index": 1,
-                        "text": "RUNNING"
+                        "text": "LAUFEND"
                       }
                     },
                     "type": "value"
@@ -701,8 +1229,56 @@
                 "value": "percent"
               },
               {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
                 "id": "decimals",
                 "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "mode": "gradient",
+                  "type": "gauge",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 80
+                    },
+                    {
+                      "color": "red",
+                      "value": 95
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "RAM"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
               }
             ]
           }
@@ -710,11 +1286,11 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 6
+        "w": 10,
+        "x": 14,
+        "y": 15
       },
-      "id": 11,
+      "id": 17,
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -753,9 +1329,22 @@
           "instant": true,
           "refId": "B",
           "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "pve_memory_usage_bytes{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", id=~\"(qemu|lxc)/.*\"}",
+          "legendFormat": "",
+          "range": false,
+          "instant": true,
+          "refId": "C",
+          "format": "table"
         }
       ],
-      "title": "Proxmox VM & LXC Guest Status",
+      "title": "Proxmox VM- & LXC-Gast-Statusmatrix",
       "transformations": [
         {
           "id": "merge",
@@ -772,12 +1361,13 @@
               "device_role": true
             },
             "renameByName": {
-              "Value #A": "Up",
+              "Value #A": "Status",
               "Value #B": "CPU %",
-              "customer": "Customer",
-              "id": "VM / LXC ID",
+              "Value #C": "RAM",
+              "customer": "Mandant",
+              "id": "VM / LXC",
               "instance": "Cluster",
-              "site": "Site"
+              "site": "Standort"
             }
           }
         }
@@ -790,11 +1380,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 14
+        "y": 23
       },
-      "id": 12,
+      "id": 18,
       "panels": [],
-      "title": "SNMP Switches, Firewalls, UPS Power & NAS Health",
+      "title": "SNMP Switch- & Firewall-Traffic, Port-Auslastung & Paketfehler",
       "type": "row"
     },
     {
@@ -841,17 +1431,17 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 9,
         "x": 0,
-        "y": 15
+        "y": 24
       },
-      "id": 13,
+      "id": 19,
       "options": {
         "legend": {
           "calcs": [
-            "mean",
+            "lastNotNull",
             "max",
-            "lastNotNull"
+            "mean"
           ],
           "displayMode": "table",
           "placement": "bottom",
@@ -888,7 +1478,7 @@
           "refId": "B"
         }
       ],
-      "title": "Switch & Firewall Interface Traffic RX/TX (bits/s)",
+      "title": "Switch- & Firewall-Interface-Traffic RX / TX (Bit/s)",
       "type": "timeseries"
     },
     {
@@ -938,16 +1528,16 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 8,
-        "y": 15
+        "x": 9,
+        "y": 24
       },
-      "id": 14,
+      "id": 20,
       "options": {
         "legend": {
           "calcs": [
-            "mean",
+            "lastNotNull",
             "max",
-            "lastNotNull"
+            "mean"
           ],
           "displayMode": "table",
           "placement": "bottom",
@@ -965,26 +1555,14 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "upsEstimatedChargeRemaining{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} or upsAdvBatteryCapacity{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}",
-          "legendFormat": "Battery % {{instance}}",
+          "expr": "((((rate(ifHCInOctets{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}[5m]) or rate(ifInOctets{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}[5m])) + (rate(ifHCOutOctets{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}[5m]) or rate(ifOutOctets{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}[5m]))) * 8) / (((ifHighSpeed{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} * 1000000) or ifSpeed{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}) > 0)) * 100",
+          "legendFormat": "{{instance}} {{ifName}}",
           "range": true,
           "instant": false,
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "upsOutputPercentLoad{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} or upsAdvOutputLoad{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}",
-          "legendFormat": "Load % {{instance}}",
-          "range": true,
-          "instant": false,
-          "refId": "B"
         }
       ],
-      "title": "UPS Battery Charge (%) & Output Load (%)",
+      "title": "Switch-/Firewall-Port-Auslastung (%)",
       "type": "timeseries"
     },
     {
@@ -1025,23 +1603,239 @@
               }
             ]
           },
-          "unit": "short"
+          "unit": "pps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 7,
+        "x": 17,
+        "y": 24
+      },
+      "id": 21,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (customer, site, instance, ifName) (rate(ifInErrors{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}[5m]) + rate(ifOutErrors{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}[5m]))",
+          "legendFormat": "Fehler/s {{instance}} {{ifName}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (customer, site, instance, ifName) (rate(ifInDiscards{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}[5m]) + rate(ifOutDiscards{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}[5m]))",
+          "legendFormat": "Discards/s {{instance}} {{ifName}}",
+          "range": true,
+          "instant": false,
+          "refId": "B"
+        }
+      ],
+      "title": "Interface Paketfehler & Discards (/s)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 22,
+      "panels": [],
+      "title": "USV-Stromversorgung, NAS-Temperaturen & Netzwerkdrucker-Toner",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "opacity",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short",
+          "min": 0
         },
         "overrides": []
       },
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
-        "y": 15
+        "x": 0,
+        "y": 33
       },
-      "id": 15,
+      "id": 23,
       "options": {
         "legend": {
           "calcs": [
-            "mean",
+            "lastNotNull",
             "max",
-            "lastNotNull"
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "upsEstimatedChargeRemaining{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} or upsAdvBatteryCapacity{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}",
+          "legendFormat": "Ladung % {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "upsOutputPercentLoad{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} or upsAdvOutputLoad{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}",
+          "legendFormat": "Last % {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "upsEstimatedMinutesRemaining{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}",
+          "legendFormat": "Stützzeit (Min) {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "C"
+        }
+      ],
+      "title": "USV Batterieladung (%), Last (%) & Stützzeit (Min)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "opacity",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "celsius",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 33
+      },
+      "id": 24,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max",
+            "mean"
           ],
           "displayMode": "table",
           "placement": "bottom",
@@ -1060,38 +1854,88 @@
           },
           "editorMode": "code",
           "expr": "diskTemperature{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} or qnapDiskTemperature{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} or systemTemperature{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}",
-          "legendFormat": "Temp °C {{instance}} {{diskID}}{{qnapDiskID}}",
+          "legendFormat": "{{instance}} {{diskID}}{{qnapDiskID}}",
           "range": true,
           "instant": false,
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "sum by (customer, site, instance, ifName) (rate(ifInErrors{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}[5m]) + rate(ifOutErrors{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}[5m]))",
-          "legendFormat": "Errors/s {{instance}} {{ifName}}",
-          "range": true,
-          "instant": false,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "((prtMarkerSuppliesLevel{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} >= 0) / ignoring (prtMarkerSuppliesDescription) group_left () (prtMarkerSuppliesMaxCapacity{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} > 0)) * 100",
-          "legendFormat": "Toner % {{instance}} {{prtMarkerSuppliesDescription}}",
-          "range": true,
-          "instant": false,
-          "refId": "C"
         }
       ],
-      "title": "NAS Disk Temperatures (°C), Printer Toner (%) & Packet Errors",
+      "title": "NAS Festplatten- & Systemtemperaturen (°C)",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 3
+              },
+              {
+                "color": "green",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 33
+      },
+      "id": 25,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "valueMode": "color"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "((prtMarkerSuppliesLevel{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} >= 0) / ignoring (prtMarkerSuppliesDescription) group_left (prtMarkerSuppliesMaxCapacity{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} > 0)) * 100",
+          "legendFormat": "{{instance}} {{prtMarkerSuppliesDescription}}",
+          "range": false,
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Netzwerkdrucker Toner- & Verbrauchsmaterialstände (%)",
+      "type": "bargauge"
     },
     {
       "collapsed": false,
@@ -1099,11 +1943,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 41
       },
-      "id": 16,
+      "id": 26,
       "panels": [],
-      "title": "Syslog Stream from Firewalls, Switches, NAS & Proxmox (Loki)",
+      "title": "Appliance- & Hypervisor-Syslog-Stream (Loki)",
       "type": "row"
     },
     {
@@ -1119,9 +1963,9 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 24
+        "y": 42
       },
-      "id": 17,
+      "id": 27,
       "options": {
         "dedupStrategy": "none",
         "enableLogDetails": true,
@@ -1144,7 +1988,7 @@
           "refId": "A"
         }
       ],
-      "title": "Appliance & Hypervisor Syslog Stream",
+      "title": "Live Syslog-Stream (Firewalls, Switches, NAS, USV & Proxmox VE)",
       "type": "logs"
     }
   ],
@@ -1177,10 +2021,10 @@
           "uid": "prometheus"
         },
         "definition": "label_values(up, customer)",
-        "description": "Mandant / Customer Tenant",
+        "description": "Mandanten-Filter (Tenant)",
         "hide": 0,
         "includeAll": true,
-        "label": "Customer",
+        "label": "Mandant",
         "multi": true,
         "name": "customer",
         "options": [],
@@ -1210,10 +2054,10 @@
           "uid": "prometheus"
         },
         "definition": "label_values(up{customer=~\"$customer\"}, site)",
-        "description": "Standort / Customer Site",
+        "description": "Standort-Filter (Site)",
         "hide": 0,
         "includeAll": true,
-        "label": "Site",
+        "label": "Standort",
         "multi": true,
         "name": "site",
         "options": [],
@@ -1243,10 +2087,10 @@
           "uid": "prometheus"
         },
         "definition": "label_values(up{customer=~\"$customer\", site=~\"$site\", device_role=~\"proxmox|snmp-.*\"}, instance)",
-        "description": "Host / System Instance",
+        "description": "Proxmox-Cluster, Switch, Firewall, USV, NAS oder Netzwerkdrucker",
         "hide": 0,
         "includeAll": true,
-        "label": "Instance",
+        "label": "System / Appliance",
         "multi": true,
         "name": "instance",
         "options": [],
@@ -1268,8 +2112,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Proxmox VE, Network, UPS & NAS Infrastructure",
+  "title": "Proxmox VE, Netzwerk, USV & NAS",
   "uid": "proxmox-snmp-infrastructure",
-  "version": 1,
+  "version": 2,
   "weekStart": "monday"
 }

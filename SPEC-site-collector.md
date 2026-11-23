@@ -139,16 +139,32 @@ tests/
 - Bearer token authentication uses `bearer_token_file = "/etc/alloy/secrets/hub.token"` (`0600`), never embedding raw tokens in process CLI arguments (`ps aux`).
 - **Authoritative Zero-Root Cluster-Wide NS8 Discovery (`bin/collect-ns8-metrics`):**
   Running on the NS8 host user slice via `ns8-collector-textfile.timer` (in the **host network namespace**, overcoming per-UID rootless Podman isolation without requiring root privileges):
-  1. **Node-Wide Module & Container Harvest:** Queries NS8's local host `node_exporter` (`http://127.0.0.1:9100/metrics`, or the node's WireGuard VPN IP discovered from Redis `node/${NODE_ID}/vpn`) to harvest NS8 Core 3.22+'s cluster-wide `ns8_container_info` / `ns8_module_*` metrics for **all** rootless modules (`mail1`, `nextcloud1`, `samba1`, `traefik1`, etc.) on that node and synthesize `ns8_container_running` and `ns8_container_restarts_total`.
-  2. **Cluster-Wide Restic Backup Harvest:** Queries the local NS8 Redis replica (`127.0.0.1:6379` via `agent.redis_connect(use_replica=True)` or `REDIS_ADDRESS`) for cluster backup schedules and per-module Restic status across all modules on the cluster/node (`ns8_backup_status`, `ns8_backup_failed`, `ns8_backup_last_success_timestamp_seconds`).
-  3. **Deterministic Offline / Test Fallback:** Falls back cleanly to JSON state files (`ns8-backups.json`), local `podman ps`, and `systemctl --user` when host `node_exporter` or Redis is unreachable or mocked in unit tests.
-- **`bin/collect-ns8-metrics` (`~/.config/state/textfile/ns8.prom`) MUST emit these exact metric & label names** to match `shared/rules/ns8-cluster.yml` and `shared/dashboards/ns8-multi-cluster-overview.json`:
-  - `ns8_backup_status{module_id="<id>"}` (`1` = succeeded, `0` = failed) and `ns8_backup_failed{module_id="<id>"}` (`0` = ok, `1` = failed)
-  - `ns8_backup_last_success_timestamp_seconds{module_id="<id>"}` (Unix epoch seconds)
-  - `ns8_container_info{module_id="<id>", container="<name>", image="<image>"}` (`1`)
-  - `ns8_container_running{module_id="<id>", container="<name>"}` (`1` = running, `0` = stopped/exited)
-  - `ns8_container_restarts_total{module_id="<id>", container="<name>"}` (Podman container restart count)
-  - `ns8_systemd_unit_failed{name="<unit>.service"}` (`1` = failed, `0` = active/healthy)
+  1. **Rootless Linux cgroups v2 NS8 Module & Pod Sub-Unit Harvest (`0444` world-readable):** Combines NS8 module accounts from `/etc/passwd` (`UID >= 1000`, `/home/<mid>`), local NS8 Redis `module/*/environment`, and `/sys/fs/cgroup`:
+     - **Rootless modules (`module_type="rootless"`):** Reads `/sys/fs/cgroup/user.slice/user-<UID>.slice/` (`cpu.stat`, `memory.current`, `memory.stat` `inactive_file`, `memory.swap.current`, `memory.max`, `memory.events` `oom_kill`, `pids.current`, `io.stat`) plus container sub-units under `user@<UID>.service/{app,user}.slice/*.service`.
+     - **Rootful modules (`module_type="rootful"`, e.g. `samba1`, `crowdsec1`):** Reads `/sys/fs/cgroup/system.slice/<mid>.service`.
+  2. **Node-Wide Module & Container Harvest:** Queries NS8's local host `node_exporter` (`http://127.0.0.1:9100/metrics`, or the node's WireGuard VPN IP discovered from Redis `node/${NODE_ID}/vpn`) to harvest NS8 Core 3.22+'s cluster-wide `ns8_container_info` / `ns8_module_*` metrics across all modules on that node, synthesizing `ContainerRecord` entries from cgroup sub-units when `ns8-metrics` is not installed.
+  3. **Cluster-Wide Restic Backup Harvest:** Queries the local NS8 Redis replica (`127.0.0.1:6379` via `agent.redis_connect(use_replica=True)` or `REDIS_ADDRESS`) for cluster backup schedules and per-module Restic status across all modules on the cluster/node (`ns8_backup_status`, `ns8_backup_failed`, `ns8_backup_last_success_timestamp_seconds`).
+  4. **Deterministic Offline / Test Fallback:** Falls back cleanly to JSON state files (`ns8-backups.json`), local `podman ps`, and `systemctl --user` when host `node_exporter` or Redis is unreachable or mocked in unit tests.
+- **`bin/collect-ns8-metrics` (`ns8.prom`) & Hub `collect-hub-ns8-metrics` (`ns8-hub-node.prom`) MUST emit these exact metric & label names** to match `shared/rules/ns8-cluster.yml` and all 6 dashboards in `shared/dashboards/`:
+  - **cgroups-v2 NS8 Module & Pod Metrics:**
+    - `ns8_module_up{module_id="<id>", module_type="rootless|rootful"}` (`1` when active `pids > 0` or `memory_current > 0`, else `0`)
+    - `ns8_module_cpu_seconds_total{module_id="<id>", module_type="..."}` (`cpu.stat` `usage_usec / 1e6`)
+    - `ns8_module_cpu_throttled_seconds_total{module_id="<id>", module_type="..."}` (`cpu.stat` `throttled_usec / 1e6`)
+    - `ns8_module_memory_bytes{module_id="<id>", module_type="..."}` (`memory.current`)
+    - `ns8_module_memory_working_set_bytes{module_id="<id>", module_type="..."}` (`max(0, memory.current - inactive_file)`)
+    - `ns8_module_memory_swap_bytes{module_id="<id>", module_type="..."}` (`memory.swap.current`)
+    - `ns8_module_memory_limit_bytes{module_id="<id>", module_type="..."}` (`memory.max`, `0` when `"max"`)
+    - `ns8_module_oom_kills_total{module_id="<id>", module_type="..."}` (`memory.events` `oom_kill`)
+    - `ns8_module_io_read_bytes_total{module_id="<id>", module_type="..."}` and `ns8_module_io_write_bytes_total{module_id="<id>", module_type="..."}` (`io.stat` `rbytes`/`wbytes`)
+    - `ns8_module_pids{module_id="<id>", module_type="..."}` (`pids.current`)
+    - `ns8_pod_unit_cpu_seconds_total{module_id="<id>", unit="<unit>"}` and `ns8_pod_unit_memory_working_set_bytes{module_id="<id>", unit="<unit>"}`
+  - **Backup, Container & Systemd Metrics:**
+    - `ns8_backup_status{module_id="<id>"}` (`1` = succeeded, `0` = failed) and `ns8_backup_failed{module_id="<id>"}` (`0` = ok, `1` = failed)
+    - `ns8_backup_last_success_timestamp_seconds{module_id="<id>"}` (Unix epoch seconds)
+    - `ns8_container_info{module_id="<id>", container="<name>", image="<image>"}` (`1`)
+    - `ns8_container_running{module_id="<id>", container="<name>"}` (`1` = running, `0` = stopped/exited)
+    - `ns8_container_restarts_total{module_id="<id>", container="<name>"}` (Podman container restart count)
+    - `ns8_systemd_unit_failed{name="<unit>.service"}` (`1` = failed, `0` = active/healthy)
 
 ---
 

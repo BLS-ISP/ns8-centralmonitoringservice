@@ -13,6 +13,24 @@
           {{ $t("common.refresh") }}
         </NsButton>
         <NsButton
+          v-if="overview.configured && overview.grafana_url"
+          kind="ghost"
+          size="field"
+          :icon="Launch20"
+          @click="openGrafanaPath('/d/ns8-pods-and-modules?orgId=1')"
+        >
+          {{ $t("status.open_ns8_pods_dashboard") }}
+        </NsButton>
+        <NsButton
+          v-if="overview.configured && overview.grafana_url"
+          kind="ghost"
+          size="field"
+          :icon="Launch20"
+          @click="openGrafanaPath('/d/central-log-explorer?orgId=1')"
+        >
+          {{ $t("status.open_log_explorer_dashboard") }}
+        </NsButton>
+        <NsButton
           kind="primary"
           size="field"
           :icon="Launch20"
@@ -516,6 +534,19 @@ export default {
           ? clean
           : `${clean}${clean.includes("?") ? "&" : "/?"}orgId=1`;
         window.open(targetUrl, "_blank", "noopener,noreferrer");
+      }
+    },
+    openGrafanaPath(subpath) {
+      if (this.overview.grafana_url && subpath) {
+        const clean = this.overview.grafana_url.replace(/\/+$/, "");
+        const normalizedPath = subpath.startsWith("/")
+          ? subpath
+          : `/${subpath}`;
+        window.open(
+          `${clean}${normalizedPath}`,
+          "_blank",
+          "noopener,noreferrer"
+        );
       }
     },
     async copyText(value) {

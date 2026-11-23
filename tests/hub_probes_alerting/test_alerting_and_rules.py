@@ -23,7 +23,7 @@ def test_get_alerting_defaults_and_rule_pack_counts(hub_env: dict[str, Any]) -> 
         "blackbox-web-ssl",
         "snmp-network-ups",
     ]
-    assert sum(p["rules_count"] for p in info["rule_packs"]) == 78
+    assert sum(p["rules_count"] for p in info["rule_packs"]) == 81
     assert all(p["enabled"] is True for p in info["rule_packs"])
 
 

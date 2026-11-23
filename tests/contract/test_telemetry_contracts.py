@@ -584,8 +584,12 @@ def _collect_ds_uids(node: Any) -> set[str]:
 def test_all_4_grafana_dashboards_conform_to_multi_org_contract() -> None:
     allowed_uids = {"prometheus", "loki", "-- Grafana --", "$datasource", "${datasource}"}
     for filename in EXPECTED_DASHBOARDS:
-        path = DASHBOARDS_DIR / filename
-        assert path.is_file(), f"Missing dashboard: {filename}"
+        assert (DASHBOARDS_DIR / filename).is_file(), f"Missing dashboard: {filename}"
+
+    dashboard_paths = sorted(DASHBOARDS_DIR.glob("*.json"))
+    assert len(dashboard_paths) >= 4
+    for path in dashboard_paths:
+        filename = path.name
         raw = path.read_bytes()
         assert b"\r\n" not in raw
         doc = json.loads(raw.decode("utf-8"))
@@ -599,6 +603,59 @@ def test_all_4_grafana_dashboards_conform_to_multi_org_contract() -> None:
 
         found_uids = _collect_ds_uids(doc["panels"])
         assert found_uids.issubset(allowed_uids), f"{filename} unexpected UIDs: {found_uids - allowed_uids}"
+
+
+def test_v110_hub_local_ns8_self_monitoring_schemas() -> None:
+    hub_cfg_in = _load_schema("hub-configure-module-input.json")
+    hub_cfg_out = _load_schema("hub-get-configuration-output.json")
+
+    for valid_customer in ("_msp_internal", "bls-isp", "acme-corp"):
+        jsonschema.validate(
+            {
+                "host": "monitoring.bls-isp.net",
+                "lets_encrypt": True,
+                "http2https": True,
+                "storage_mode": "local",
+                "monitor_local_ns8_node": True,
+                "local_node_customer": valid_customer,
+                "local_node_site": "hub",
+            },
+            hub_cfg_in,
+        )
+
+    for bad_customer in ("_other_internal", "UPPERCASE", "a", "../bad"):
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(
+                {
+                    "host": "monitoring.bls-isp.net",
+                    "lets_encrypt": True,
+                    "http2https": True,
+                    "storage_mode": "local",
+                    "monitor_local_ns8_node": True,
+                    "local_node_customer": bad_customer,
+                    "local_node_site": "hub",
+                },
+                hub_cfg_in,
+            )
+
+    for bad_site in ("x", "HUB_UPPER", "-bad"):
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(
+                {
+                    "host": "monitoring.bls-isp.net",
+                    "lets_encrypt": True,
+                    "http2https": True,
+                    "storage_mode": "local",
+                    "monitor_local_ns8_node": True,
+                    "local_node_customer": "_msp_internal",
+                    "local_node_site": bad_site,
+                },
+                hub_cfg_in,
+            )
+
+    for req_field in ("monitor_local_ns8_node", "local_node_customer", "local_node_site"):
+        assert req_field in hub_cfg_out["required"]
+        assert req_field in hub_cfg_out["properties"]
 
 
 def test_all_6_standalone_alloy_templates_have_valid_placeholders_and_sinks() -> None:

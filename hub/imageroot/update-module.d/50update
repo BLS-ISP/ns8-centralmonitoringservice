@@ -12,6 +12,7 @@ if str(_PYPKG) not in sys.path:
 
 from hub_core import (  # noqa: E402
     CORE_CONTAINER_SERVICES,
+    METRICS_TIMER_UNIT,
     POD_SERVICE,
     THANOS_SERVICES,
     resolve_state_dir,
@@ -22,6 +23,7 @@ from hub_core.env_store import (  # noqa: E402
     ensure_initial_secrets,
     read_module_env,
 )
+from hub_core.local_ns8_telemetry import collect_hub_ns8_metrics  # noqa: E402
 
 
 def main() -> int:
@@ -37,6 +39,16 @@ def main() -> int:
 
     discover_smarthost(state_dir)
     render_all_configs(state_dir)
+
+    if env.get("MONITOR_LOCAL_NS8_NODE", "true").lower() == "true":
+        collect_hub_ns8_metrics(state_dir)
+    else:
+        stale_prom = state_dir / "textfile" / "ns8-hub-node.prom"
+        try:
+            if stale_prom.is_file():
+                stale_prom.unlink()
+        except OSError:
+            pass
 
     try:
         from hub_tenancy.ldap_sync import sync_ldap_config
@@ -74,6 +86,13 @@ def main() -> int:
         for t_unit in reversed(THANOS_SERVICES):
             agent.run_helper("systemctl", "--user", "stop", t_unit)
         agent.run_helper("systemctl", "--user", "disable", *THANOS_SERVICES)
+
+    if env.get("MONITOR_LOCAL_NS8_NODE", "true").lower() == "true":
+        agent.run_helper("systemctl", "--user", "enable", METRICS_TIMER_UNIT)
+        agent.run_helper("systemctl", "--user", "restart", METRICS_TIMER_UNIT)
+    else:
+        agent.run_helper("systemctl", "--user", "stop", METRICS_TIMER_UNIT)
+        agent.run_helper("systemctl", "--user", "disable", METRICS_TIMER_UNIT)
 
     try:
         from hub_tenancy.grafana_sync import sync_all_orgs_if_running

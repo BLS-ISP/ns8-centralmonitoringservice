@@ -475,7 +475,9 @@ class TestGrafanaOrgAndLdapSync:
         assert org1_loki["editable"] is False
         assert org1_loki["jsonData"]["httpHeaderName1"] == "X-Scope-OrgID"
         assert org1_loki["secureJsonData"]["httpHeaderValue1"] == "acme-corp|beta-gmbh|_msp_internal"
-        assert len(grafana_state["dashboards"][1]) == 4
+        expected_dash_count = len(list((REPO_ROOT / "shared" / "dashboards").glob("*.json")))
+        assert expected_dash_count in (4, 6)
+        assert len(grafana_state["dashboards"][1]) == expected_dash_count
 
         # Verify Customer Org 2 created for acme-corp with prom-label-proxy (:9095) and single-tenant Loki
         raw_tenants = load_tenants_raw(state_dir)
@@ -500,7 +502,7 @@ class TestGrafanaOrgAndLdapSync:
         assert viewer_uid not in grafana_state["org_users"][1]
 
         # Verify Customer Org dashboards are non-editable and lock/hide $customer to acme-corp
-        assert len(grafana_state["dashboards"][cust_org_id]) == 4
+        assert len(grafana_state["dashboards"][cust_org_id]) == expected_dash_count
         for dash in grafana_state["dashboards"][cust_org_id]:
             assert dash["editable"] is False
             cust_var = next(v for v in dash["templating"]["list"] if v["name"] == "customer")

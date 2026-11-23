@@ -71,6 +71,7 @@ FORBIDDEN_EXACT_PATHS: Final[frozenset[str]] = frozenset(
 
 FORBIDDEN_PATH_PREFIXES: Final[tuple[str, ...]] = (
     "/alert-relay",
+    "/metrics/",
     "/api/alertmanager/",
     "/api/ruler/",
     "/api/v1/provisioning/",

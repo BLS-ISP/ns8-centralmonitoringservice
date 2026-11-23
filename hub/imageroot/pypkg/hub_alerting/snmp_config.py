@@ -21,7 +21,14 @@ _IF_LOOKUPS_YAML = """        lookups:
             oid: 1.3.6.1.2.1.31.1.1.1.18
             type: DisplayString"""
 
-_COMMON_IF_METRICS_YAML = f"""      - name: ifAdminStatus
+_COMMON_IF_METRICS_YAML = f"""      - name: ifSpeed
+        oid: 1.3.6.1.2.1.2.2.1.5
+        type: gauge
+        indexes:
+          - labelname: ifIndex
+            type: gauge
+{_IF_LOOKUPS_YAML}
+      - name: ifAdminStatus
         oid: 1.3.6.1.2.1.2.2.1.7
         type: gauge
         indexes:
@@ -87,6 +94,13 @@ _COMMON_IF_METRICS_YAML = f"""      - name: ifAdminStatus
       - name: ifHCOutOctets
         oid: 1.3.6.1.2.1.31.1.1.1.10
         type: counter
+        indexes:
+          - labelname: ifIndex
+            type: gauge
+{_IF_LOOKUPS_YAML}
+      - name: ifHighSpeed
+        oid: 1.3.6.1.2.1.31.1.1.1.15
+        type: gauge
         indexes:
           - labelname: ifIndex
             type: gauge

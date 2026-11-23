@@ -196,6 +196,9 @@ class MockGrafanaState:
         self.org_switch_calls: list[tuple[int, int]] = []
         self.deleted_user_ids: set[int] = set()
         self.ldap_reloads: int = 0
+        self.dashboard_reloads: int = 0
+        self.simulate_org1_file_provisioned: bool = False
+        self.org1_provisioned_rejections: int = 0
         self.ds_proxy_hits: list[tuple[str, str]] = []
 
     def add_org1_user(
@@ -564,11 +567,21 @@ class LiveObservabilityBackends:
 
         async def upsert_dashboard(req: web.Request) -> web.Response:
             oid = _org_id(req)
+            if oid == 1 and state.simulate_org1_file_provisioned:
+                state.org1_provisioned_rejections += 1
+                return web.json_response(
+                    {"message": "Cannot save provisioned dashboard"},
+                    status=400,
+                )
             body = await req.json()
             dash = body["dashboard"]
             uid = str(dash.get("uid") or dash.get("title"))
             state.dashboards.setdefault(oid, {})[uid] = dash
             return web.json_response({"status": "success", "uid": uid})
+
+        async def admin_reload_dashboards(_req: web.Request) -> web.Response:
+            state.dashboard_reloads += 1
+            return web.json_response({"message": "Dashboards config reloaded"})
 
         async def lookup_user(req: web.Request) -> web.Response:
             login = req.query.get("loginOrEmail", "").strip().lower()
@@ -732,6 +745,7 @@ class LiveObservabilityBackends:
         app.router.add_post("/api/admin/users/{uid:[0-9]+}/{toggle:(?:enable|disable)}", admin_toggle_user)
         app.router.add_put("/api/admin/users/{uid:[0-9]+}/password", admin_set_password)
         app.router.add_post("/api/admin/provisioning/ldap/reload", admin_reload_ldap)
+        app.router.add_post("/api/admin/provisioning/dashboards/reload", admin_reload_dashboards)
         app.router.add_post("/api/users/{uid:[0-9]+}/using/{oid:[0-9]+}", switch_user_org)
         return app
 

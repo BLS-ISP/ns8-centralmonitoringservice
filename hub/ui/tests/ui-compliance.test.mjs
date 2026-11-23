@@ -118,15 +118,15 @@ test("NS8 UI Rule #3: en and de translation parity and mandatory NS8 keys", () =
   assert.ok(!deRaw.includes("{min}") && !deRaw.includes("{max}"));
 });
 
-test("v1.0.3 & v1.0.4 UX: simulateCustomerView, ?orgId=1, NsMultiSelect LDAP group+user pickers, and version 1.0.4", () => {
+test("v1.0.3–v1.1.0 UX: simulateCustomerView, ?orgId=1, NsMultiSelect LDAP, Hub Self-Monitoring, quick links, and version 1.1.0", () => {
   const pkg = JSON.parse(
     fs.readFileSync(path.join(uiRoot, "package.json"), "utf8")
   );
   const cfg = JSON.parse(
     fs.readFileSync(path.join(uiRoot, "public", "config.json"), "utf8")
   );
-  assert.equal(pkg.version, "1.0.4");
-  assert.equal(cfg.version, "1.0.4");
+  assert.equal(pkg.version, "1.1.0");
+  assert.equal(cfg.version, "1.1.0");
 
   const statusSrc = fs.readFileSync(
     path.join(uiRoot, "src", "views", "Status.vue"),
@@ -142,6 +142,8 @@ test("v1.0.3 & v1.0.4 UX: simulateCustomerView, ?orgId=1, NsMultiSelect LDAP gro
   );
 
   assert.ok(statusSrc.includes("orgId=1"));
+  assert.ok(statusSrc.includes("/d/ns8-pods-and-modules?orgId=1"));
+  assert.ok(statusSrc.includes("/d/central-log-explorer?orgId=1"));
   assert.ok(settingsSrc.includes("orgId=1"));
   assert.ok(settingsSrc.includes("<NsMultiSelect"));
   assert.ok(settingsSrc.includes("ldap_admin_principals"));
@@ -150,6 +152,10 @@ test("v1.0.3 & v1.0.4 UX: simulateCustomerView, ?orgId=1, NsMultiSelect LDAP gro
   assert.ok(settingsSrc.includes("discoveredLdapUsers"));
   assert.ok(settingsSrc.includes("ldapOptionScope"));
   assert.ok(settingsSrc.includes("normalizePrincipalsListWithDiscovered"));
+  assert.ok(settingsSrc.includes("monitor_local_ns8_node"));
+  assert.ok(settingsSrc.includes("local_node_customer"));
+  assert.ok(settingsSrc.includes("local_node_site"));
+  assert.ok(settingsSrc.includes("_msp_internal"));
   assert.ok(tenantsSrc.includes("simulateCustomerView"));
   assert.ok(tenantsSrc.includes("simulate_customer_view_btn"));
   assert.ok(tenantsSrc.includes("open_filtered_msp_view_btn"));

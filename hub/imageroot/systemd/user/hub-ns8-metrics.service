@@ -1,0 +1,9 @@
+[Unit]
+Description=Collect local NS8 host and cgroups-v2 pod metrics (ns8-hub-node.prom)
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%E/etc/defaults.env
+EnvironmentFile=-%E/state/environment
+WorkingDirectory=%E/state
+ExecStart=%h/.config/bin/collect-hub-ns8-metrics

@@ -173,6 +173,25 @@
       "maxLength": 256,
       "default": "",
       "description": "New local Grafana Org 1 admin password (min 8 chars when non-empty; empty string keeps current password)."
+    },
+    "monitor_local_ns8_node": {
+      "type": "boolean",
+      "default": true,
+      "description": "Enable rootless host + cgroups-v2 NS8 pod/module self-monitoring on the Hub node (job hub-ns8-node via 127.0.0.1:9097/metrics/ns8-node)."
+    },
+    "local_node_customer": {
+      "type": "string",
+      "maxLength": 48,
+      "default": "_msp_internal",
+      "pattern": "^(_msp_internal|[a-z0-9][a-z0-9-]{1,46}[a-z0-9])$",
+      "description": "Tenant label stamped on Hub local NS8 self-monitoring metrics ('_msp_internal' for MSP Org 1 only, or an active tenant slug)."
+    },
+    "local_node_site": {
+      "type": "string",
+      "maxLength": 48,
+      "default": "hub",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,46}[a-z0-9]$",
+      "description": "Site label stamped on Hub local NS8 self-monitoring metrics."
     }
   },
   "allOf": [

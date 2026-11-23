@@ -12,9 +12,12 @@ from collector_lib.hub_probe import verify_hub_connection
 from collector_lib.ns8_metrics import (
     BackupRecord,
     ContainerRecord,
+    ModuleCgroupRecord,
+    PodUnitCgroupRecord,
     SystemdUnitRecord,
     collect_and_write_ns8_metrics,
     format_ns8_prom,
+    harvest_ns8_cgroups_v2,
     write_ns8_prom_atomic,
 )
 from collector_lib.runtime import (
@@ -36,6 +39,8 @@ __all__ = [
     "BackupRecord",
     "CollectorConfig",
     "ContainerRecord",
+    "ModuleCgroupRecord",
+    "PodUnitCgroupRecord",
     "RenderResult",
     "SystemdUnitRecord",
     "TargetsStore",
@@ -47,6 +52,7 @@ __all__ = [
     "compute_wal_usage_bytes",
     "format_ns8_prom",
     "get_state_dir",
+    "harvest_ns8_cgroups_v2",
     "has_enabled_proxmox_targets",
     "load_stored_auth_token",
     "reload_alloy_config",

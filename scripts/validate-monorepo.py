@@ -141,9 +141,11 @@ EXPECTED_RULE_FILES: tuple[str, ...] = (
 
 EXPECTED_DASHBOARD_FILES: tuple[str, ...] = (
     "ns8-multi-cluster-overview.json",
+    "ns8-pods-and-modules.json",
     "linux-windows-servers.json",
     "proxmox-snmp-infrastructure.json",
     "web-ssl-uptime.json",
+    "central-log-explorer.json",
 )
 
 EXPECTED_TEMPLATE_FILES: tuple[str, ...] = (

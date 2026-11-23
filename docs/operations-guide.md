@@ -141,7 +141,10 @@ flowchart TD
 3. Klicken Sie auf **Verbindung testen** (`test-hub-connection` prüft `/api/v1/ingest/verify` inkl. TLS-Zertifikat und Token-Zugehörigkeit) und anschließend auf **Speichern**.
 
 > [!NOTE]
-> **Zero-Root Cluster-Wide NS8-Sichtbarkeit (`bin/collect-ns8-metrics`):** Obwohl der Collector zu 100 % unprivilegiert als eigener Rootless-Benutzer läuft, erfasst `ns8-collector-textfile.timer` (im Host-Netzwerk-Namespace) automatisch **alle** auf dem Knoten laufenden Rootless-NS8-Module (`mail1`, `nextcloud1`, `samba1`, `traefik1` usw.) über den lokalen NS8-`node_exporter` (`127.0.0.1:9100` bzw. WireGuard-IP) sowie den **clusterweiten Restic-Backup-Status aller Module** lesend über das lokale NS8-Redis-Replikat (`127.0.0.1:6379`) und schreibt diese atomar nach `ns8.prom`.
+> **Rootless Linux cgroups-v2 NS8-Pod/Modul-Telemetrie, Hub-Selbstüberwachung & 6 Enterprise-NOC-Dashboards:**
+> - **cgroups-v2 Pod- & Modul-Harvester (`ns8_module_*` & `ns8_pod_unit_*`):** Obwohl der Collector zu 100 % unprivilegiert läuft, erfasst `ns8-collector-textfile.timer` neben `node_exporter`- und Restic-Backup-Metriken direkt aus `/sys/fs/cgroup` (`0444`) pro **Rootless-Modul** (`user-<UID>.slice` + einzelne Container-Units wie `dovecot`, `rspamd`, `mariadb`, `prometheus`) und **Rootful-Modul** (`system.slice/<mid>.service`, z. B. `samba1`, `crowdsec1`) CPU-Auslastung, CPU-Throttling, Working-Set-RAM, Swap, Disk-I/O, PIDs und OOM-Kills.
+> - **Integrierte Hub-Knoten-Selbstüberwachung (`monitor_local_ns8_node`):** Unter **Central Monitoring Hub -> Einstellungen** überwacht der Hub standardmäßig auch seinen eigenen NS8-Host inkl. aller dort laufenden Module ohne zusätzlichen Collector (Mandanten-Label `local_node_customer`, Standard `_msp_internal`, Standort `local_node_site`, intern über `127.0.0.1:9097/metrics/ns8-node`).
+> - **6 Enterprise-NOC-Grafana-11-Dashboards & 81 Alarmregeln:** Automatisch in **Org 1** (inkl. Grafana-11-Provisioning-Reload bei Updates) und aktiven Kunden-Orgs bereitgestellt: `ns8-multi-cluster-overview`, `ns8-pods-and-modules`, `linux-windows-servers`, `proxmox-snmp-infrastructure`, `web-ssl-uptime` und `central-log-explorer` (mit Cross-Dashboard-Drilldowns und 81 `promtool`-geprüften Regeln).
 
 ### 4.3 Variante B: Kundenstandort OHNE NethServer 8 (Windows, Linux, Docker)
 

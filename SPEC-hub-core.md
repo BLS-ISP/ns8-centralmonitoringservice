@@ -70,7 +70,8 @@ hub/
       module-dump-state                -> Online SQLite backup of grafana.db + Alertmanager nflog/silences snapshot
       module-cleanup-state             -> Removes temporary grafana.db.bak after Restic snapshot completes
       discover-smarthost               -> Queries NS8 Redis cluster/smarthost and writes state/smarthost.env
-      render-hub-configs               -> Renders prometheus.yml, loki.yaml, grafana.ini, objstore.yml atomically
+      render-hub-configs               -> Renders prometheus.yml, loki.yaml, grafana.ini, objstore.yml & copies 6 dashboards atomically
+      collect-hub-ns8-metrics          -> Rootless host (/proc, /sys, statvfs) + cgroups-v2 NS8 pod/module exporter writing state/textfile/ns8-hub-node.prom
     actions/
       create-module/
         20initialize                   -> Generates internal secrets, initial admin password, calls agent.dump_env()
@@ -115,6 +116,8 @@ hub/
       thanos-sidecar.service           -> Thanos Sidecar (:10912 HTTP / :10911 gRPC, active only in storage_mode=s3)
       thanos-store.service             -> Thanos Store Gateway (:10922 HTTP / :10921 gRPC, active only in storage_mode=s3)
       thanos-query.service             -> Thanos Query (:10902 HTTP / :10901 gRPC, active only in storage_mode=s3)
+      hub-ns8-metrics.service          -> Oneshot rootless NS8 host + cgroups-v2 pod collector (%E/ state, no root privileges)
+      hub-ns8-metrics.timer            -> Triggers hub-ns8-metrics.service every 30s when monitor_local_ns8_node=true
 tests/
   hub_core/                            -> Unit & integration tests for Hub actions, config generation, S3/Thanos, backup
 ```
@@ -134,6 +137,7 @@ tests/
   - `:9090` -> `prometheus`
   - `:9093` -> `alertmanager`
   - `:9095` -> `prom-label-proxy` (`--upstream=${PROMQL_UPSTREAM_URL}`)
+  - `:9097` -> `hub-gateway` internal loopback listener (`/alert-relay/{ntfy|gotify}` + `GET /metrics/ns8-node` serving `state/textfile/ns8-hub-node.prom` for job `hub-ns8-node` when `monitor_local_ns8_node == true`, stamped with `customer=<local_node_customer>`, `site=<local_node_site>`, `device_role="ns8"`, `collector_id="hub-local"`)
   - `:9115` -> `blackbox-exporter`
   - `:9116` -> `snmp-exporter`
   - `:10902` (HTTP), `:10901` (gRPC) -> `thanos-query` (`storage_mode == "s3"`)

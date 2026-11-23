@@ -227,6 +227,12 @@ def ns8_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeNS8
         "LDAP_ADMIN_PRINCIPALS_B64",
         "LDAP_EDITOR_PRINCIPALS_B64",
         "LDAP_VIEWER_PRINCIPALS_B64",
+        "MONITOR_LOCAL_NS8_NODE",
+        "LOCAL_NODE_CUSTOMER",
+        "LOCAL_NODE_SITE",
+        "NS8_PROC_ROOT",
+        "NS8_CGROUP_ROOT",
+        "NS8_PASSWD_FILE",
     ):
         monkeypatch.delenv(key, raising=False)
 

@@ -19,6 +19,7 @@ from hub_core.env_store import (  # noqa: E402
     build_urls,
     discover_smarthost,
 )
+from hub_core.local_ns8_telemetry import collect_hub_ns8_metrics  # noqa: E402
 from hub_core.pod_http import reload_grafana_ldap_if_running  # noqa: E402
 
 
@@ -32,13 +33,23 @@ def main() -> int:
         env = apply_configuration(state_dir, request)
     except ValueError as exc:
         agent.set_status("validation-failed")
+        err_msg = str(exc)
+        err_field = (
+            "local_node_customer"
+            if "local_node_customer" in err_msg
+            else "local_node_site"
+            if "local_node_site" in err_msg
+            else "grafana_admin_password"
+            if "grafana_admin_password" in err_msg
+            else "s3"
+        )
         json.dump(
             [
                 {
-                    "field": "s3",
-                    "parameter": "s3",
+                    "field": err_field,
+                    "parameter": err_field,
                     "value": "",
-                    "error": str(exc),
+                    "error": err_msg,
                 }
             ],
             sys.stdout,
@@ -47,6 +58,16 @@ def main() -> int:
 
     discover_smarthost(state_dir)
     render_all_configs(state_dir)
+
+    if env.get("MONITOR_LOCAL_NS8_NODE", "true").lower() == "true":
+        collect_hub_ns8_metrics(state_dir)
+    else:
+        stale_prom = state_dir / "textfile" / "ns8-hub-node.prom"
+        try:
+            if stale_prom.is_file():
+                stale_prom.unlink()
+        except OSError:
+            pass
 
     # Register HTTP ingress route in NS8 Traefik (strictly 127.0.0.1:${TCP_PORT})
     module_id = env.get("MODULE_ID", "central-monitoring-hub1")

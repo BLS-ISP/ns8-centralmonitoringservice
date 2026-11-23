@@ -23,6 +23,9 @@ BACKFILL_ENV_DEFAULTS = {
     "LDAP_ADMIN_GROUP": "Domain Admins",
     "LDAP_EDITOR_GROUP": "",
     "LDAP_VIEWER_GROUP": "",
+    "MONITOR_LOCAL_NS8_NODE": "true",
+    "LOCAL_NODE_CUSTOMER": "_msp_internal",
+    "LOCAL_NODE_SITE": "hub",
 }
 
 

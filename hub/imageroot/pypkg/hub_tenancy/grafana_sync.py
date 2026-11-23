@@ -43,9 +43,11 @@ from hub_tenancy.store import (
 
 DASHBOARD_FILENAMES = (
     "ns8-multi-cluster-overview.json",
+    "ns8-pods-and-modules.json",
     "linux-windows-servers.json",
     "proxmox-snmp-infrastructure.json",
     "web-ssl-uptime.json",
+    "central-log-explorer.json",
 )
 HOME_DASHBOARD_UID = "ns8-multi-cluster-overview"
 
@@ -370,6 +372,17 @@ def _sync_org1(
         },
     )
 
+    try:
+        client.request(
+            "POST",
+            "/api/admin/provisioning/dashboards/reload",
+            {},
+            org_id=1,
+            allow_404=True,
+        )
+    except RuntimeError:
+        pass
+
     folder_uid = "msp-central-monitoring"
     f_status, _ = client.request("GET", f"/api/folders/{folder_uid}", org_id=1, allow_404=True)
     if f_status == 404:
@@ -383,12 +396,18 @@ def _sync_org1(
     for model in dashboards:
         m_copy = copy.deepcopy(model)
         m_copy["id"] = None
-        client.request(
-            "POST",
-            "/api/dashboards/db",
-            {"dashboard": m_copy, "folderUid": folder_uid, "overwrite": True},
-            org_id=1,
-        )
+        try:
+            client.request(
+                "POST",
+                "/api/dashboards/db",
+                {"dashboard": m_copy, "folderUid": folder_uid, "overwrite": True},
+                org_id=1,
+            )
+        except RuntimeError as exc:
+            err_low = str(exc).lower()
+            if "provisioned" in err_low or "(400)" in err_low:
+                continue
+            raise
 
     _set_org_home_dashboard(client, 1, dashboards)
 

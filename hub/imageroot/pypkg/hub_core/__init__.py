@@ -41,6 +41,9 @@ THANOS_SERVICES: Final[tuple[str, ...]] = (
     "thanos-query.service",
 )
 
+METRICS_SERVICE_UNIT: Final[str] = "hub-ns8-metrics.service"
+METRICS_TIMER_UNIT: Final[str] = "hub-ns8-metrics.timer"
+
 ALL_COMPONENT_KEYS: Final[tuple[str, ...]] = (
     "hub_gateway",
     "prometheus",

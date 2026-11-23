@@ -329,6 +329,22 @@ def create_alert_relay_app(settings: AlertRelaySettings) -> web.Application:
     async def handle_healthy(_req: web.Request) -> web.Response:
         return web.json_response({"status": "ok"})
 
+    async def handle_ns8_node_metrics(_req: web.Request) -> web.Response:
+        prom_file = settings.state_dir / "textfile" / "ns8-hub-node.prom"
+        body_text = "# Hub local NS8 telemetry warming up\n"
+        if prom_file.is_file():
+            try:
+                raw = prom_file.read_text(encoding="utf-8")
+                if raw.strip():
+                    body_text = raw if raw.endswith("\n") else f"{raw}\n"
+            except OSError:
+                pass
+        return web.Response(
+            body=body_text.encode("utf-8"),
+            status=200,
+            headers={"Content-Type": "text/plain; version=0.0.4; charset=utf-8"},
+        )
+
     async def handle_ntfy(request: web.Request) -> web.Response:
         try:
             payload = await request.json()
@@ -534,6 +550,7 @@ def create_alert_relay_app(settings: AlertRelaySettings) -> web.Application:
         return web.json_response({"status": "ok", "provider": "gotify", "forwarded_alerts": count})
 
     app.router.add_get("/-/healthy", handle_healthy)
+    app.router.add_get("/metrics/ns8-node", handle_ns8_node_metrics)
     app.router.add_post("/alert-relay/ntfy", handle_ntfy)
     app.router.add_post("/alert-relay/gotify", handle_gotify)
     return app

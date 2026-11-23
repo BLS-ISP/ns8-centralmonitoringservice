@@ -247,6 +247,10 @@ def test_arch18_snmp_auths_yml_includes_full_apcupsd_and_generic_metrics(
         "name: ifAdminStatus",
         "name: ifHCInOctets",
         "name: ifHCOutOctets",
+        "name: ifInOctets",
+        "name: ifOutOctets",
+        "name: ifSpeed",
+        "name: ifHighSpeed",
     ):
         assert req_metric in snmp_yml, f"Missing SNMP metric definition in snmp-auths.yml: {req_metric}"
 

@@ -56,6 +56,14 @@ def main() -> int:
                 )
                 agent.set_env(b64_key, encode_ldap_principals(resolved))
 
+        for default_key, default_val in (
+            ("MONITOR_LOCAL_NS8_NODE", "true"),
+            ("LOCAL_NODE_CUSTOMER", "_msp_internal"),
+            ("LOCAL_NODE_SITE", "hub"),
+        ):
+            if default_key not in str_env:
+                agent.set_env(default_key, default_val)
+
     # NS8 Rule #2: Flush environment to disk immediately!
     agent.dump_env()
     return 0

@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodic timer for Hub local NS8 host and cgroups-v2 pod metrics (every 30s)
+
+[Timer]
+OnBootSec=10s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Unit=hub-ns8-metrics.service
+
+[Install]
+WantedBy=timers.target default.target

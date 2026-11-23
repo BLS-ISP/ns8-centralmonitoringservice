@@ -12,6 +12,7 @@ if str(_PYPKG) not in sys.path:
 
 from hub_core import (  # noqa: E402
     CORE_CONTAINER_SERVICES,
+    METRICS_TIMER_UNIT,
     POD_SERVICE,
     THANOS_SERVICES,
     resolve_state_dir,
@@ -40,6 +41,13 @@ def main() -> int:
         for t_unit in reversed(THANOS_SERVICES):
             agent.run_helper("systemctl", "--user", "stop", t_unit)
         agent.run_helper("systemctl", "--user", "disable", *THANOS_SERVICES)
+
+    if env.get("MONITOR_LOCAL_NS8_NODE", "true").lower() == "true":
+        agent.run_helper("systemctl", "--user", "enable", METRICS_TIMER_UNIT)
+        agent.run_helper("systemctl", "--user", "restart", METRICS_TIMER_UNIT)
+    else:
+        agent.run_helper("systemctl", "--user", "stop", METRICS_TIMER_UNIT)
+        agent.run_helper("systemctl", "--user", "disable", METRICS_TIMER_UNIT)
 
     # Sync Grafana orgs/datasources once containers are started
     try:

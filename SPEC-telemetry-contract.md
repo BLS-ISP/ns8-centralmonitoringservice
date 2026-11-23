@@ -78,10 +78,12 @@ shared/
     blackbox-web-ssl.yml               -> HTTP availability, status >=400/500, latency >3s, TLS expiry <21d/<7d, DNS/TCP rules
     snmp-network-ups.yml               -> SNMP reachability, UPS battery/runtime/replace, switch/firewall ifOperStatus/errors, NAS health
   dashboards/
-    ns8-multi-cluster-overview.json    -> MSP Fleet Executive Summary (alerts, nodes, backups, top consumers, Loki errors)
-    linux-windows-servers.json         -> Detailed Linux & Windows server metrics + host logs
-    proxmox-snmp-infrastructure.json   -> Proxmox VE, SNMP network/firewall/UPS/NAS metrics + Syslog stream
-    web-ssl-uptime.json                -> Blackbox availability %, response time, TLS certificate expiry countdown
+    ns8-multi-cluster-overview.json    -> MSP Fleet Executive Summary (KPI sparklines, active alerts, Restic backups, top hosts & NS8 pods, Loki errors)
+    ns8-pods-and-modules.json          -> NethServer 8 Pods, Modules & Containers Deep-Dive (cgroups-v2 CPU, Working-Set RAM, Swap, OOM kills, I/O, sub-unit breakdown)
+    linux-windows-servers.json         -> Detailed Linux & Windows server metrics (CPU modes, load vs cores, disk latency/IOPS, network) + host logs
+    proxmox-snmp-infrastructure.json   -> Proxmox VE, SNMP network/firewall/UPS/NAS/Printer metrics + Syslog stream
+    web-ssl-uptime.json                -> Blackbox availability state-timeline, stacked HTTP phases, TLS certificate expiry SLA countdown
+    central-log-explorer.json          -> Central Log & Security Explorer (LogQL volume histogram by level, top log sources, full-text search)
   alloy-templates/
     config-linux.alloy.tmpl            -> Standalone Linux Alloy config (unix exporter + journal + optional SNMP/Syslog + WAL)
     config-windows.alloy.tmpl          -> Standalone Windows Alloy config (windows exporter + eventlog + WAL)

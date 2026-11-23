@@ -552,7 +552,89 @@
         </div>
       </section>
 
-      <!-- 4. NS8 Restic Backup Behavior -->
+      <!-- 4. Local NS8 Node & Pod Self-Monitoring -->
+      <section class="section-card">
+        <div class="section-card__header">
+          <div>
+            <h2 class="section-card__title">
+              {{ $t("settings.self_monitoring_section_title") }}
+            </h2>
+            <p class="section-card__subtitle">
+              {{ $t("settings.self_monitoring_section_desc") }}
+            </p>
+          </div>
+        </div>
+
+        <NsToggle
+          v-model="form.monitor_local_ns8_node"
+          :label="$t('settings.monitor_local_ns8_node_label')"
+          value="monitorLocalNs8Node"
+          :disabled="saving"
+        >
+          <template slot="text-left">{{ $t("common.disabled") }}</template>
+          <template slot="text-right">{{ $t("common.enabled") }}</template>
+        </NsToggle>
+
+        <div v-if="form.monitor_local_ns8_node" class="mg-top-md">
+          <div class="form-grid-2">
+            <div>
+              <cv-select
+                v-if="
+                  !useCustomLocalCustomerInput &&
+                  !validationErrors.local_node_customer
+                "
+                v-model="form.local_node_customer"
+                :label="$t('settings.local_node_customer_label')"
+                :helper-text="$t('settings.local_node_customer_helper')"
+                :disabled="saving"
+              >
+                <cv-select-option value="_msp_internal">
+                  {{ $t("settings.local_node_customer_msp_only") }}
+                </cv-select-option>
+                <cv-select-option
+                  v-for="opt in localNodeCustomerSelectOptions"
+                  :key="opt.value"
+                  :value="opt.value"
+                >
+                  {{ opt.label }}
+                </cv-select-option>
+              </cv-select>
+
+              <NsTextInput
+                v-else
+                v-model.trim="form.local_node_customer"
+                :label="$t('settings.local_node_customer_label')"
+                :helper-text="$t('settings.local_node_customer_helper')"
+                placeholder="_msp_internal"
+                :disabled="saving"
+                :invalid-message="validationErrors.local_node_customer"
+              />
+            </div>
+
+            <NsTextInput
+              v-model.trim="form.local_node_site"
+              :label="$t('settings.local_node_site_label')"
+              :helper-text="$t('settings.local_node_site_helper')"
+              placeholder="hub"
+              :disabled="saving"
+              :invalid-message="validationErrors.local_node_site"
+            />
+          </div>
+
+          <NsToggle
+            v-model="useCustomLocalCustomerInput"
+            :label="$t('settings.local_node_customer_custom_toggle')"
+            value="customLocalNodeCustomer"
+            :disabled="saving"
+            class="mg-top-md"
+          >
+            <template slot="text-left">{{ $t("common.no") }}</template>
+            <template slot="text-right">{{ $t("common.yes") }}</template>
+          </NsToggle>
+        </div>
+      </section>
+
+      <!-- 5. NS8 Restic Backup Behavior -->
       <section class="section-card">
         <div class="section-card__header">
           <div>
@@ -610,6 +692,9 @@ import Search20 from "@carbon/icons-vue/es/search/20";
 const FQDN_RE =
   /^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$/;
 const S3_BUCKET_RE = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/;
+const LOCAL_NODE_CUSTOMER_RE =
+  /^(_msp_internal|[a-z0-9][a-z0-9-]{1,46}[a-z0-9])$/;
+const LOCAL_NODE_SITE_RE = /^[a-z0-9][a-z0-9-]{0,46}[a-z0-9]$/;
 
 export default {
   name: "Settings",
@@ -643,6 +728,8 @@ export default {
       hasS3SecretKey: false,
       hasGrafanaAdminPassword: false,
       availableLdapDomains: [],
+      availableTenants: [],
+      useCustomLocalCustomerInput: false,
       grafanaUrl: "",
       validationErrors: {},
       feedbackBanner: {
@@ -674,11 +761,42 @@ export default {
         ldap_editor_principals: [],
         ldap_viewer_principals: [],
         grafana_admin_password: "",
+        monitor_local_ns8_node: true,
+        local_node_customer: "_msp_internal",
+        local_node_site: "hub",
       },
     };
   },
   computed: {
     ...mapState(["instanceName", "appName", "core"]),
+    localNodeCustomerSelectOptions() {
+      const opts = [];
+      const seen = new Set(["_msp_internal"]);
+      (Array.isArray(this.availableTenants) ? this.availableTenants : []).forEach(
+        (t) => {
+          const slug = t && t.customer ? String(t.customer).trim() : "";
+          if (!slug || seen.has(slug)) {
+            return;
+          }
+          seen.add(slug);
+          opts.push({
+            value: slug,
+            label:
+              t.display_name && t.display_name !== slug
+                ? `${t.display_name} (${slug})`
+                : slug,
+          });
+        }
+      );
+      const current = String(this.form.local_node_customer || "").trim();
+      if (current && !seen.has(current)) {
+        opts.push({
+          value: current,
+          label: current,
+        });
+      }
+      return opts;
+    },
     ldapTestNotificationKind() {
       if (!this.ldapTestResult) {
         return "info";
@@ -1072,8 +1190,40 @@ export default {
       this.testingLdapUser = false;
       this.ldapTestResult = (taskResult && taskResult.output) || null;
     },
+    async loadTenantsLookup() {
+      const taskAction = "list-tenants";
+      const eventId = this.getUuid();
+
+      (this.core && this.core.$root ? this.core.$root : this.$root).$once(
+        `${taskAction}-completed-${eventId}`,
+        (ctx, res) => {
+          const out = (res && res.output) || {};
+          this.availableTenants = Array.isArray(out.tenants) ? out.tenants : [];
+        }
+      );
+
+      const res = await this.to(
+        this.createModuleTaskForApp(this.instanceName, {
+          action: taskAction,
+          data: { search: "", page: 1, page_size: 200 },
+          extra: {
+            title: this.$t("action.list-tenants"),
+            isNotificationHidden: true,
+            eventId,
+          },
+        })
+      );
+      const err = res[0];
+      if (err) {
+        this.createErrorNotificationForApp(
+          err,
+          this.$t("task.cannot_create_task")
+        );
+      }
+    },
     async getConfiguration() {
       this.loading = true;
+      this.loadTenantsLookup();
       const taskAction = "get-configuration";
       const eventId = this.getUuid();
 
@@ -1191,6 +1341,12 @@ export default {
           []
         ),
         grafana_admin_password: "",
+        monitor_local_ns8_node:
+          cfg.monitor_local_ns8_node !== undefined
+            ? Boolean(cfg.monitor_local_ns8_node)
+            : true,
+        local_node_customer: cfg.local_node_customer || "_msp_internal",
+        local_node_site: cfg.local_node_site || "hub",
       };
 
       if (this.form.ldap_enabled && this.form.ldap_domain.trim()) {
@@ -1252,6 +1408,24 @@ export default {
         );
       }
 
+      if (this.form.monitor_local_ns8_node) {
+        const localCust = (this.form.local_node_customer || "").trim();
+        if (!LOCAL_NODE_CUSTOMER_RE.test(localCust)) {
+          errors.local_node_customer = this.$t(
+            "settings.validation_local_node_customer"
+          );
+        }
+        const localSite = (this.form.local_node_site || "")
+          .trim()
+          .toLowerCase();
+        this.form.local_node_site = localSite;
+        if (!LOCAL_NODE_SITE_RE.test(localSite)) {
+          errors.local_node_site = this.$t(
+            "settings.validation_local_node_site"
+          );
+        }
+      }
+
       this.validationErrors = errors;
       return Object.keys(errors).length === 0;
     },
@@ -1268,6 +1442,16 @@ export default {
       const viewerPrincipals = this.cleanPrincipalsArray(
         this.form.ldap_viewer_principals
       );
+      const rawLocalCustomer = (this.form.local_node_customer || "").trim();
+      const safeLocalCustomer = LOCAL_NODE_CUSTOMER_RE.test(rawLocalCustomer)
+        ? rawLocalCustomer
+        : "_msp_internal";
+      const rawLocalSite = (this.form.local_node_site || "")
+        .trim()
+        .toLowerCase();
+      const safeLocalSite = LOCAL_NODE_SITE_RE.test(rawLocalSite)
+        ? rawLocalSite
+        : "hub";
 
       return {
         host: this.form.host.trim().toLowerCase(),
@@ -1297,6 +1481,9 @@ export default {
         ldap_editor_group: editorPrincipals[0] || "",
         ldap_viewer_group: viewerPrincipals[0] || "",
         grafana_admin_password: this.form.grafana_admin_password || "",
+        monitor_local_ns8_node: Boolean(this.form.monitor_local_ns8_node),
+        local_node_customer: safeLocalCustomer,
+        local_node_site: safeLocalSite,
       };
     },
     async saveSettings() {

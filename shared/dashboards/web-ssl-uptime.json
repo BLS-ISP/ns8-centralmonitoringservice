@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Blackbox HTTP/HTTPS/DNS/TCP endpoint availability, response latency, probe status matrix, and TLS certificate expiration countdown.",
+  "description": "Blackbox-Überwachung für HTTP/HTTPS-Websites, DNS-Auflösung, TCP-Dienste, Phasen-Antwortzeiten und TLS/SSL-Zertifikats-Restlaufzeiten.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -30,7 +30,7 @@
         "ns8-central-monitoring"
       ],
       "targetBlank": false,
-      "title": "MSP Dashboards",
+      "title": "Monitoring-Ansichten",
       "type": "dashboards"
     }
   ],
@@ -45,7 +45,7 @@
       },
       "id": 1,
       "panels": [],
-      "title": "Web, HTTPS, DNS & TLS Certificate Availability Summary",
+      "title": "Web-, DNS- & SSL-Zertifikats-Verfügbarkeit (SLA Übersicht)",
       "type": "row"
     },
     {
@@ -59,6 +59,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -107,7 +108,7 @@
           "refId": "A"
         }
       ],
-      "title": "Monitored Endpoints",
+      "title": "Überwachte Endpunkte",
       "type": "stat"
     },
     {
@@ -121,6 +122,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -173,7 +175,7 @@
           "refId": "A"
         }
       ],
-      "title": "Endpoints UP",
+      "title": "Endpunkte Erreichbar (UP)",
       "type": "stat"
     },
     {
@@ -187,6 +189,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -239,7 +242,7 @@
           "refId": "A"
         }
       ],
-      "title": "Endpoints DOWN",
+      "title": "Endpunkte Gestört (DOWN)",
       "type": "stat"
     },
     {
@@ -253,6 +256,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "-",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -310,7 +314,7 @@
           "refId": "A"
         }
       ],
-      "title": "24h Fleet Uptime (%)",
+      "title": "24h Verfügbarkeit (SLA %)",
       "type": "stat"
     },
     {
@@ -324,6 +328,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "-",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -381,7 +386,7 @@
           "refId": "A"
         }
       ],
-      "title": "Soonest TLS Expiry (Days)",
+      "title": "Kürzeste SSL-Restlaufzeit",
       "type": "stat"
     },
     {
@@ -395,6 +400,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "-",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -404,16 +410,16 @@
               },
               {
                 "color": "yellow",
-                "value": 1.5
+                "value": 1500
               },
               {
                 "color": "red",
-                "value": 3.0
+                "value": 3000
               }
             ]
           },
-          "unit": "s",
-          "decimals": 3
+          "unit": "ms",
+          "decimals": 0
         },
         "overrides": []
       },
@@ -445,14 +451,14 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "avg(probe_duration_seconds{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", module!~\"dns.*|tcp.*\"})",
+          "expr": "avg(probe_duration_seconds{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", module!~\"dns.*|tcp.*\"}) * 1000",
           "legendFormat": "",
           "range": true,
           "instant": false,
           "refId": "A"
         }
       ],
-      "title": "Avg HTTP Response Time",
+      "title": "Ø HTTP-Antwortzeit",
       "type": "stat"
     },
     {
@@ -465,7 +471,7 @@
       },
       "id": 8,
       "panels": [],
-      "title": "TLS Certificate Countdown & Probe Status Matrix",
+      "title": "Verfügbarkeits-Historie (State-Timeline) & Gestapelte HTTP-Phasen-Latenz",
       "type": "row"
     },
     {
@@ -479,11 +485,111 @@
             "mode": "thresholds"
           },
           "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
+            "fillOpacity": 85,
+            "insertNulls": false,
+            "lineWidth": 0,
+            "spanNulls": false
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "index": 0,
+                  "text": "AUSFALL"
+                },
+                "1": {
+                  "color": "green",
+                  "index": 1,
+                  "text": "ONLINE"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "id": 9,
+      "options": {
+        "alignValue": "left",
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "mergeValues": true,
+        "rowHeight": 0.85,
+        "showValue": "auto",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "probe_success{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}",
+          "legendFormat": "{{customer}}/{{site}} - {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Verfügbarkeits-Historie pro Endpunkt (State-Timeline)",
+      "type": "state-timeline",
+      "description": "Lückenlose Darstellung von Online-Phasen (grün) und Ausfällen (rot) pro überwachtem Endpunkt."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 25,
+            "gradientMode": "opacity",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
           },
           "mappings": [],
           "thresholds": {
@@ -494,89 +600,34 @@
                 "value": null
               }
             ]
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Days Remaining"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "d"
-              },
-              {
-                "id": "decimals",
-                "value": 1
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background"
-                }
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "red",
-                      "value": null
-                    },
-                    {
-                      "color": "orange",
-                      "value": 7
-                    },
-                    {
-                      "color": "green",
-                      "value": 21
-                    }
-                  ]
-                }
-              }
-            ]
           },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Expires At"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "dateTimeAsIso"
-              }
-            ]
-          }
-        ]
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 9,
         "w": 12,
-        "x": 0,
+        "x": 12,
         "y": 6
       },
-      "id": 9,
+      "id": 10,
       "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max",
+            "mean"
           ],
-          "show": false
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
         },
-        "showHeader": true,
-        "sortBy": [
-          {
-            "desc": false,
-            "displayName": "Days Remaining"
-          }
-        ]
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
@@ -585,12 +636,11 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(probe_ssl_earliest_cert_expiry{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} - time()) / 86400",
-          "legendFormat": "",
-          "range": false,
-          "instant": true,
-          "refId": "A",
-          "format": "table"
+          "expr": "probe_http_duration_seconds{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", phase=\"resolve\"}",
+          "legendFormat": "[DNS] {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
         },
         {
           "datasource": {
@@ -598,54 +648,65 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "probe_ssl_earliest_cert_expiry{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} * 1000",
-          "legendFormat": "",
-          "range": false,
-          "instant": true,
-          "refId": "B",
-          "format": "table"
-        }
-      ],
-      "title": "TLS Certificate Expiry Countdown (Sorted by Soonest Expiry)",
-      "transformations": [
-        {
-          "id": "merge",
-          "options": {}
+          "expr": "probe_http_duration_seconds{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", phase=\"connect\"}",
+          "legendFormat": "[TCP] {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "B"
         },
         {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true,
-              "__name__": true,
-              "job": true,
-              "collector_id": true,
-              "device_role": true
-            },
-            "renameByName": {
-              "Value #A": "Days Remaining",
-              "Value #B": "Expires At",
-              "customer": "Customer",
-              "instance": "Endpoint URL",
-              "module": "Module",
-              "site": "Site"
-            }
-          }
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "probe_http_duration_seconds{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", phase=\"tls\"}",
+          "legendFormat": "[TLS] {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "C"
         },
         {
-          "id": "sortBy",
-          "options": {
-            "fields": {},
-            "sort": [
-              {
-                "desc": false,
-                "field": "Days Remaining"
-              }
-            ]
-          }
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "probe_http_duration_seconds{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", phase=\"processing\"}",
+          "legendFormat": "[Server Processing] {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "probe_http_duration_seconds{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\", phase=\"transfer\"}",
+          "legendFormat": "[Transfer] {{instance}}",
+          "range": true,
+          "instant": false,
+          "refId": "E"
         }
       ],
-      "type": "table"
+      "title": "Gestapelte HTTP-Phasen-Antwortzeit (DNS / TCP / TLS / Server Processing / Transfer)",
+      "type": "timeseries",
+      "description": "Aufschlüsselung der HTTP/HTTPS-Laufzeit nach DNS-Auflösung, TCP-Handshake, TLS-Verhandlung, Server-Antwortzeit und Download."
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "id": 11,
+      "panels": [],
+      "title": "SSL-Zertifikats-Countdown-Matrix & 7-Tage-SLA",
+      "type": "row"
     },
     {
       "datasource": {
@@ -696,12 +757,12 @@
                       "0": {
                         "color": "red",
                         "index": 0,
-                        "text": "DOWN"
+                        "text": "AUSFALL"
                       },
                       "1": {
                         "color": "green",
                         "index": 1,
-                        "text": "UP"
+                        "text": "ONLINE"
                       }
                     },
                     "type": "value"
@@ -713,16 +774,70 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Duration"
+              "options": "SSL-Resttage"
             },
             "properties": [
               {
                 "id": "unit",
-                "value": "s"
+                "value": "d"
               },
               {
                 "id": "decimals",
-                "value": 3
+                "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 7
+                    },
+                    {
+                      "color": "green",
+                      "value": 21
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Ablaufdatum"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Latenz"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              },
+              {
+                "id": "decimals",
+                "value": 0
               }
             ]
           }
@@ -730,11 +845,11 @@
       },
       "gridPos": {
         "h": 9,
-        "w": 12,
-        "x": 12,
-        "y": 6
+        "w": 15,
+        "x": 0,
+        "y": 16
       },
-      "id": 10,
+      "id": 12,
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -745,7 +860,13 @@
           ],
           "show": false
         },
-        "showHeader": true
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "SSL-Resttage"
+          }
+        ]
       },
       "targets": [
         {
@@ -767,7 +888,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "probe_http_status_code{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}",
+          "expr": "(probe_ssl_earliest_cert_expiry{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} - time()) / 86400",
           "legendFormat": "",
           "range": false,
           "instant": true,
@@ -780,15 +901,41 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "probe_duration_seconds{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}",
+          "expr": "probe_ssl_earliest_cert_expiry{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} * 1000",
           "legendFormat": "",
           "range": false,
           "instant": true,
           "refId": "C",
           "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "probe_http_status_code{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}",
+          "legendFormat": "",
+          "range": false,
+          "instant": true,
+          "refId": "D",
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "probe_duration_seconds{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"} * 1000",
+          "legendFormat": "",
+          "range": false,
+          "instant": true,
+          "refId": "E",
+          "format": "table"
         }
       ],
-      "title": "Blackbox Probe Status Matrix (HTTP Status, Latency & Reachability)",
+      "title": "SSL-Zertifikats-Countdown & Endpunkt-Statusmatrix (Sortiert nach Restlaufzeit)",
       "transformations": [
         {
           "id": "merge",
@@ -806,113 +953,31 @@
             },
             "renameByName": {
               "Value #A": "Status",
-              "Value #B": "HTTP Code",
-              "Value #C": "Duration",
-              "customer": "Customer",
-              "instance": "Endpoint",
-              "module": "Probe",
-              "site": "Site"
+              "Value #B": "SSL-Resttage",
+              "Value #C": "Ablaufdatum",
+              "Value #D": "HTTP-Code",
+              "Value #E": "Latenz",
+              "customer": "Mandant",
+              "instance": "Endpunkt / URL",
+              "module": "Prüfmodul",
+              "site": "Standort"
             }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "desc": false,
+                "field": "SSL-Resttage"
+              }
+            ]
           }
         }
       ],
       "type": "table"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 15
-      },
-      "id": 11,
-      "panels": [],
-      "title": "HTTP Response Latency & Rolling Availability",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "drawStyle": "line",
-            "fillOpacity": 15,
-            "gradientMode": "opacity",
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "pointSize": 5,
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "s",
-          "min": 0
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 16
-      },
-      "id": 12,
-      "options": {
-        "legend": {
-          "calcs": [
-            "mean",
-            "max",
-            "lastNotNull"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "probe_duration_seconds{customer=~\"$customer\", site=~\"$site\", instance=~\"$instance\"}",
-          "legendFormat": "{{customer}}/{{site}} - {{instance}}",
-          "range": true,
-          "instant": false,
-          "refId": "A"
-        }
-      ],
-      "title": "Probe Response Time (s)",
-      "type": "timeseries"
     },
     {
       "datasource": {
@@ -925,8 +990,6 @@
             "mode": "thresholds"
           },
           "mappings": [],
-          "max": 100,
-          "min": 90,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -944,19 +1007,21 @@
               }
             ]
           },
-          "unit": "percent"
+          "unit": "percent",
+          "min": 95,
+          "max": 100
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
+        "h": 9,
+        "w": 9,
+        "x": 15,
         "y": 16
       },
       "id": 13,
       "options": {
-        "displayMode": "lcd",
+        "displayMode": "gradient",
         "minVizHeight": 16,
         "minVizWidth": 8,
         "namePlacement": "auto",
@@ -985,7 +1050,7 @@
           "refId": "A"
         }
       ],
-      "title": "7-Day Availability SLA per Endpoint (%)",
+      "title": "7-Tage Verfügbarkeits-SLA pro Endpunkt (%)",
       "type": "bargauge"
     }
   ],
@@ -998,7 +1063,7 @@
     "web",
     "ssl",
     "tls",
-    "uptime"
+    "sla"
   ],
   "templating": {
     "list": [
@@ -1018,10 +1083,10 @@
           "uid": "prometheus"
         },
         "definition": "label_values(up, customer)",
-        "description": "Mandant / Customer Tenant",
+        "description": "Mandanten-Filter (Tenant)",
         "hide": 0,
         "includeAll": true,
-        "label": "Customer",
+        "label": "Mandant",
         "multi": true,
         "name": "customer",
         "options": [],
@@ -1051,10 +1116,10 @@
           "uid": "prometheus"
         },
         "definition": "label_values(up{customer=~\"$customer\"}, site)",
-        "description": "Standort / Customer Site",
+        "description": "Standort-Filter (Site)",
         "hide": 0,
         "includeAll": true,
-        "label": "Site",
+        "label": "Standort",
         "multi": true,
         "name": "site",
         "options": [],
@@ -1084,10 +1149,10 @@
           "uid": "prometheus"
         },
         "definition": "label_values(probe_success{customer=~\"$customer\", site=~\"$site\"}, instance)",
-        "description": "Probed URL / Endpoint",
+        "description": "Überwachte Website, API, DNS- oder TCP-Gegenstelle",
         "hide": 0,
         "includeAll": true,
-        "label": "Endpoint",
+        "label": "Endpunkt / URL",
         "multi": true,
         "name": "instance",
         "options": [],
@@ -1109,8 +1174,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Web, HTTPS & TLS Certificate Uptime",
+  "title": "Web, DNS & SSL-Zertifikate (SLA)",
   "uid": "web-ssl-uptime",
-  "version": 1,
+  "version": 2,
   "weekStart": "monday"
 }

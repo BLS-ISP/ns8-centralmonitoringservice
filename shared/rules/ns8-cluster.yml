@@ -224,3 +224,39 @@ groups:
         annotations:
           summary: "[{{ $labels.customer }}/{{ $labels.site }}] NS8 Systemd-Dienst fehlgeschlagen ({{ $labels.name }} auf {{ $labels.instance }})"
           description: "Ein System- oder Rootless-Modul-Systemd-Dienst ({{ $labels.name }}) befindet sich auf NS8-Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) im Status 'failed'."
+
+      - alert: NS8ModuleOOMKilled
+        expr: increase(ns8_module_oom_kills_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] NS8-Modul OOM-Kill erkannt ({{ $labels.module_id }} auf {{ $labels.instance }})"
+          description: "Im NS8-Modul '{{ $labels.module_id }}' (Typ: {{ $labels.module_type }}) auf Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) hat der Linux-cgroups-v2-Kernelprozesse wegen Speichermangels beendet (OOM-Kill)."
+
+      - alert: NS8ModuleMemoryNearLimit
+        expr: >
+          (ns8_module_memory_limit_bytes > 0)
+          and
+          (((ns8_module_memory_working_set_bytes / (ns8_module_memory_limit_bytes > 0)) * 100) > 90)
+        for: 10m
+        labels:
+          severity: warning
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] NS8-Modul '{{ $labels.module_id }}' nahe Speicherlimit (>90% auf {{ $labels.instance }})"
+          description: "Der Working-Set-Speicher von NS8-Modul '{{ $labels.module_id }}' ({{ $labels.module_type }}) auf Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) überschreitet 90% des konfigurierten cgroups-v2-Speicherlimits."
+
+      - alert: NS8ModuleHighSwapUsage
+        expr: >
+          (ns8_module_memory_swap_bytes > 1073741824)
+          and on (customer, site, instance)
+          (((1 - (node_memory_MemAvailable_bytes{device_role="ns8"} / (node_memory_MemTotal_bytes{device_role="ns8"} > 0))) * 100) > 85)
+        for: 15m
+        labels:
+          severity: warning
+          category: compute
+        annotations:
+          summary: "[{{ $labels.customer }}/{{ $labels.site }}] Hohe Pod-Swap-Nutzung (>1 GiB) bei NS8-Modul '{{ $labels.module_id }}' ({{ $labels.instance }})"
+          description: "NS8-Modul '{{ $labels.module_id }}' auf Knoten {{ $labels.instance }} ({{ $labels.customer }} / {{ $labels.site }}) belegt über 1 GiB Swap bei gleichzeitig hoher Host-RAM-Auslastung (>85%)."

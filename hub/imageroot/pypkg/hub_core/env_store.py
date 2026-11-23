@@ -6,6 +6,7 @@ import base64
 import binascii
 import json
 import os
+import re
 import secrets as py_secrets
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -19,6 +20,8 @@ from hub_core.storage_s3 import normalize_s3_settings
 
 
 _FORBIDDEN_SECRET_CHARS = ("\r", "\n", "\x00", "\u2028", "\u2029")
+_LOCAL_NODE_CUSTOMER_RE = re.compile(r"^(_msp_internal|[a-z0-9][a-z0-9-]{1,46}[a-z0-9])\Z")
+_LOCAL_NODE_SITE_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,46}[a-z0-9]\Z")
 
 
 def _validate_secret_value(key: str, val: str) -> None:
@@ -208,6 +211,8 @@ def read_module_env(state_dir: str | Path | None = None) -> dict[str, str]:
                 "BLACKBOX_",
                 "SNMP_",
                 "THANOS_",
+                "MONITOR_LOCAL_",
+                "LOCAL_NODE_",
             )
         ):
             merged[key] = val
@@ -266,6 +271,9 @@ def initialize_default_env(state_dir: str | Path | None = None) -> dict[str, str
         "LDAP_ADMIN_PRINCIPALS_B64": encode_ldap_principals(admin_init),
         "LDAP_EDITOR_PRINCIPALS_B64": encode_ldap_principals(editor_init),
         "LDAP_VIEWER_PRINCIPALS_B64": encode_ldap_principals(viewer_init),
+        "MONITOR_LOCAL_NS8_NODE": "true",
+        "LOCAL_NODE_CUSTOMER": "_msp_internal",
+        "LOCAL_NODE_SITE": "hub",
     }
     for img_key, img_val in resolve_pinned_images(state_dir).items():
         if not existing.get(img_key):
@@ -369,6 +377,30 @@ def apply_configuration(state_dir: str | Path | None, request: dict[str, Any]) -
     ldap_editor_group = editor_principals[0] if editor_principals else ""
     ldap_viewer_group = viewer_principals[0] if viewer_principals else ""
 
+    existing = read_module_env(sdir)
+    if "monitor_local_ns8_node" in request:
+        monitor_local_ns8_node = bool(request["monitor_local_ns8_node"])
+    else:
+        monitor_local_ns8_node = existing.get("MONITOR_LOCAL_NS8_NODE", "true").lower() == "true"
+
+    if "local_node_customer" in request and str(request["local_node_customer"]).strip():
+        raw_local_customer = str(request["local_node_customer"]).strip()
+        if not _LOCAL_NODE_CUSTOMER_RE.match(raw_local_customer):
+            raise ValueError(f"Invalid local_node_customer: {raw_local_customer!r}")
+        local_node_customer = raw_local_customer
+    else:
+        prev_cust = existing.get("LOCAL_NODE_CUSTOMER", "_msp_internal").strip() or "_msp_internal"
+        local_node_customer = prev_cust if _LOCAL_NODE_CUSTOMER_RE.match(prev_cust) else "_msp_internal"
+
+    if "local_node_site" in request and str(request["local_node_site"]).strip():
+        raw_local_site = str(request["local_node_site"]).strip()
+        if not _LOCAL_NODE_SITE_RE.match(raw_local_site):
+            raise ValueError(f"Invalid local_node_site: {raw_local_site!r}")
+        local_node_site = raw_local_site
+    else:
+        prev_site = existing.get("LOCAL_NODE_SITE", "hub").strip() or "hub"
+        local_node_site = prev_site if _LOCAL_NODE_SITE_RE.match(prev_site) else "hub"
+
     promql_upstream = "http://127.0.0.1:10902" if storage_mode == "s3" else "http://127.0.0.1:9090"
     prom_extra_args = build_prometheus_extra_args(storage_mode, retention_size_gb)
 
@@ -398,8 +430,10 @@ def apply_configuration(state_dir: str | Path | None, request: dict[str, Any]) -
         "LDAP_ADMIN_PRINCIPALS_B64": encode_ldap_principals(admin_principals),
         "LDAP_EDITOR_PRINCIPALS_B64": encode_ldap_principals(editor_principals),
         "LDAP_VIEWER_PRINCIPALS_B64": encode_ldap_principals(viewer_principals),
+        "MONITOR_LOCAL_NS8_NODE": "true" if monitor_local_ns8_node else "false",
+        "LOCAL_NODE_CUSTOMER": local_node_customer,
+        "LOCAL_NODE_SITE": local_node_site,
     }
-    existing = read_module_env(sdir)
     for img_key, img_val in resolve_pinned_images(state_dir).items():
         if not existing.get(img_key):
             agent.set_env(img_key, img_val)

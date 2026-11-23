@@ -1347,7 +1347,7 @@ class TestV102AuditRemediations:
         import hub_gateway
         from hub_gateway.app import GatewaySettings, create_gateway_app
 
-        assert hub_gateway.__version__ == "1.0.4"
+        assert hub_gateway.__version__ == "1.1.0"
 
         upstream_hits: list[tuple[str, str]] = []
         g_app = web.Application()

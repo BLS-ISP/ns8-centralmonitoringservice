@@ -20,6 +20,7 @@ EXPECTED_SYSTEMD_UNITS = {
     "thanos-sidecar.service",
     "thanos-store.service",
     "thanos-query.service",
+    "hub-ns8-metrics.service",
 }
 
 EXPECTED_PINNED_IMAGE_REPOS = [
@@ -97,10 +98,22 @@ def test_ns8_rules_3_5_6_systemd_units_compliance() -> None:
                     assert ext not in stripped, (
                         f"LIVE-NS8-01 violation in {unit_name}: single-file bind mount {stripped!r} breaks atomic os.replace()!"
                     )
-        if unit_name != "central-monitoring-hub.service":
+        if unit_name == "hub-ns8-metrics.service":
+            assert "Type=oneshot" in content
+            assert "ExecStart=%h/.config/bin/collect-hub-ns8-metrics" in content
+        elif unit_name != "central-monitoring-hub.service":
             assert "--pull=missing" in content, f"NS8 Rule #5 violation in {unit_name}: missing --pull=missing"
             assert "--restart=on-failure" in content, f"NS8 Rule #6 violation in {unit_name}: missing --restart=on-failure"
             assert "--user 0:0" in content, f"Missing rootless userns UID 0 mapping (--user 0:0) in {unit_name}"
+
+    timer_unit = systemd_dir / "hub-ns8-metrics.timer"
+    assert timer_unit.is_file(), "Missing hub-ns8-metrics.timer in hub/imageroot/systemd/user/"
+    timer_content = timer_unit.read_text(encoding="utf-8")
+    assert "%S/" not in timer_content
+    assert "OnBootSec=10s" in timer_content
+    assert "OnUnitActiveSec=30s" in timer_content
+    assert "Unit=hub-ns8-metrics.service" in timer_content
+    assert "WantedBy=timers.target default.target" in timer_content
 
     for dependent_unit in ("grafana.service", "hub-gateway.service", "thanos-sidecar.service"):
         dep_content = (systemd_dir / dependent_unit).read_text(encoding="utf-8")
@@ -134,6 +147,7 @@ def test_ns8_rules_5_7_8_containerfile_and_backup_files() -> None:
     assert (IMAGEROOT / "bin" / "module-cleanup-state").exists()
     assert (IMAGEROOT / "bin" / "discover-smarthost").exists()
     assert (IMAGEROOT / "bin" / "render-hub-configs").exists()
+    assert (IMAGEROOT / "bin" / "collect-hub-ns8-metrics").exists()
     assert (IMAGEROOT / "update-module.d" / "20pull_images").exists()
     assert (IMAGEROOT / "update-module.d" / "50update").exists()
 

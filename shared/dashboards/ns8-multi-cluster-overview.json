@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "MSP Executive Fleet Overview across NethServer 8 clusters, backups, module containers, resource top consumers, and live Loki error logs.",
+  "description": "Zentrales MSP-Executive-Dashboard für NethServer-8-Cluster, cgroups-v2-Pod-Ressourcen, Restic-Backups, Alarme und Flotten-Gesundheit.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -30,7 +30,7 @@
         "ns8-central-monitoring"
       ],
       "targetBlank": false,
-      "title": "MSP Dashboards",
+      "title": "Monitoring-Ansichten",
       "type": "dashboards"
     }
   ],
@@ -45,7 +45,7 @@
       },
       "id": 1,
       "panels": [],
-      "title": "MSP Fleet & NethServer 8 Executive Summary",
+      "title": "MSP Leitstand — Flottenstatus, Alarme & NethServer 8 KPIs",
       "type": "row"
     },
     {
@@ -59,6 +59,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -78,7 +79,7 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
+        "w": 3,
         "x": 0,
         "y": 1
       },
@@ -111,8 +112,9 @@
           "refId": "A"
         }
       ],
-      "title": "Critical Alerts",
-      "type": "stat"
+      "title": "Kritische Alarme",
+      "type": "stat",
+      "description": "Aktuell feuernde kritische Alarme über ausgewählte Mandanten & Standorte."
     },
     {
       "datasource": {
@@ -125,6 +127,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -144,8 +147,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 4,
+        "w": 3,
+        "x": 3,
         "y": 1
       },
       "id": 3,
@@ -177,8 +180,9 @@
           "refId": "A"
         }
       ],
-      "title": "Warning Alerts",
-      "type": "stat"
+      "title": "Warnungen",
+      "type": "stat",
+      "description": "Aktive Warnmeldungen über ausgewählte Mandanten & Standorte."
     },
     {
       "datasource": {
@@ -191,6 +195,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -210,8 +215,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 8,
+        "w": 3,
+        "x": 6,
         "y": 1
       },
       "id": 4,
@@ -243,8 +248,9 @@
           "refId": "A"
         }
       ],
-      "title": "NS8 Nodes Up",
-      "type": "stat"
+      "title": "NS8-Knoten Online",
+      "type": "stat",
+      "description": "Erreichbare NethServer-8-Clusterknoten inkl. Hub-Self-Monitoring."
     },
     {
       "datasource": {
@@ -257,6 +263,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -276,8 +283,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 12,
+        "w": 3,
+        "x": 9,
         "y": 1
       },
       "id": 5,
@@ -309,8 +316,9 @@
           "refId": "A"
         }
       ],
-      "title": "All Monitored Targets Up",
-      "type": "stat"
+      "title": "Systeme Gesamt Online",
+      "type": "stat",
+      "description": "Alle online überwachten Ziele (NS8, Linux, Windows, Proxmox, SNMP, Web)."
     },
     {
       "datasource": {
@@ -323,6 +331,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -342,8 +351,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 16,
+        "w": 3,
+        "x": 12,
         "y": 1
       },
       "id": 6,
@@ -368,15 +377,16 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "count(ns8_container_running{customer=~\"$customer\", site=~\"$site\"} == 1) or count(ns8_container_info{customer=~\"$customer\", site=~\"$site\"}) or vector(0)",
+          "expr": "count(ns8_module_up{customer=~\"$customer\", site=~\"$site\"} == 1) or count(ns8_container_running{customer=~\"$customer\", site=~\"$site\"} == 1) or vector(0)",
           "legendFormat": "",
           "range": true,
           "instant": false,
           "refId": "A"
         }
       ],
-      "title": "NS8 Containers Active",
-      "type": "stat"
+      "title": "Aktive NS8-Module / Pods",
+      "type": "stat",
+      "description": "Aktive NethServer-8-Module (Rootless-Pods & Rootful-Dienste via cgroups v2)."
     },
     {
       "datasource": {
@@ -389,6 +399,76 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 15,
+        "y": 1
+      },
+      "id": 7,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(increase(ns8_module_oom_kills_total{customer=~\"$customer\", site=~\"$site\"}[24h])) or vector(0)",
+          "legendFormat": "",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "title": "NS8 Pod-OOM-Kills (24h)",
+      "type": "stat",
+      "description": "Anzahl der cgroups-v2 Out-Of-Memory-Kills in NS8-Pods innerhalb der letzten 24 Stunden."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -408,11 +488,11 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 20,
+        "w": 3,
+        "x": 18,
         "y": 1
       },
-      "id": 7,
+      "id": 8,
       "options": {
         "colorMode": "background",
         "graphMode": "area",
@@ -441,8 +521,81 @@
           "refId": "A"
         }
       ],
-      "title": "NS8 Failed Backups",
-      "type": "stat"
+      "title": "Fehlerhafte Restic-Backups",
+      "type": "stat",
+      "description": "Fehlgeschlagene NS8-Restic-Modulbackups."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 21,
+        "y": 1
+      },
+      "id": 9,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "count(((probe_ssl_earliest_cert_expiry{customer=~\"$customer\", site=~\"$site\"} - time()) / 86400) < 14) or vector(0)",
+          "legendFormat": "",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "title": "SSL-Zertifikate < 14d",
+      "type": "stat",
+      "description": "Überwachte HTTPS-Endpunkte mit weniger als 14 Tagen Zertifikats-Restlaufzeit."
     },
     {
       "collapsed": false,
@@ -452,9 +605,9 @@
         "x": 0,
         "y": 5
       },
-      "id": 8,
+      "id": 10,
       "panels": [],
-      "title": "Active Alerts & NS8 Restic Backup Status",
+      "title": "Flotten-Gesundheitsmatrix & Aktive Alarme",
       "type": "row"
     },
     {
@@ -489,7 +642,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Severity"
+              "options": "Status"
             },
             "properties": [
               {
@@ -503,18 +656,199 @@
                 "value": [
                   {
                     "options": {
-                      "critical": {
+                      "0": {
                         "color": "red",
                         "index": 0,
-                        "text": "CRITICAL"
+                        "text": "OFFLINE"
                       },
-                      "warning": {
-                        "color": "orange",
+                      "1": {
+                        "color": "green",
                         "index": 1,
-                        "text": "WARNING"
+                        "text": "ONLINE"
                       }
                     },
                     "type": "value"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CPU %"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "mode": "gradient",
+                  "type": "gauge",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 75
+                    },
+                    {
+                      "color": "red",
+                      "value": 90
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "RAM %"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "mode": "gradient",
+                  "type": "gauge",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 80
+                    },
+                    {
+                      "color": "red",
+                      "value": 90
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Max. Disk %"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "mode": "gradient",
+                  "type": "gauge",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 85
+                    },
+                    {
+                      "color": "red",
+                      "value": 95
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "System"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Server Deep-Dive öffnen",
+                    "url": "/d/linux-windows-servers?${__url.time_range}&var-customer=${__data.fields.Mandant}&var-site=${__data.fields.Standort}&var-instance=${__data.fields.System}"
+                  },
+                  {
+                    "title": "NS8-Pods & Module öffnen",
+                    "url": "/d/ns8-pods-and-modules?${__url.time_range}&var-customer=${__data.fields.Mandant}&var-site=${__data.fields.Standort}&var-instance=${__data.fields.System}"
+                  },
+                  {
+                    "title": "System-Logs im Explorer öffnen",
+                    "url": "/d/central-log-explorer?${__url.time_range}&var-customer=${__data.fields.Mandant}&var-site=${__data.fields.Standort}&var-instance=${__data.fields.System}"
                   }
                 ]
               }
@@ -523,12 +857,12 @@
         ]
       },
       "gridPos": {
-        "h": 8,
-        "w": 13,
+        "h": 9,
+        "w": 14,
         "x": 0,
         "y": 6
       },
-      "id": 9,
+      "id": 11,
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -548,37 +882,80 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "ALERTS{alertstate=\"firing\", customer=~\"$customer\", site=~\"$site\"}",
+          "expr": "max by (customer, site, device_role, instance) (up{customer=~\"$customer\", site=~\"$site\"})",
           "legendFormat": "",
           "range": false,
           "instant": true,
           "refId": "A",
           "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(100 - (avg by (customer, site, device_role, instance) (rate(node_cpu_seconds_total{customer=~\"$customer\", site=~\"$site\", mode=\"idle\"}[5m])) * 100)) or (100 - (avg by (customer, site, device_role, instance) (rate(windows_cpu_time_total{customer=~\"$customer\", site=~\"$site\", mode=\"idle\"}[5m])) * 100))",
+          "legendFormat": "",
+          "range": false,
+          "instant": true,
+          "refId": "B",
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(avg by (customer, site, device_role, instance) ((1 - (node_memory_MemAvailable_bytes{customer=~\"$customer\", site=~\"$site\"} / (node_memory_MemTotal_bytes{customer=~\"$customer\", site=~\"$site\"} > 0))) * 100)) or (avg by (customer, site, device_role, instance) (100 * (1 - (windows_memory_available_bytes{customer=~\"$customer\", site=~\"$site\"} / ((windows_memory_physical_total_bytes{customer=~\"$customer\", site=~\"$site\"} or windows_cs_physical_memory_bytes{customer=~\"$customer\", site=~\"$site\"} or windows_os_visible_memory_bytes{customer=~\"$customer\", site=~\"$site\"}) > 0)))))",
+          "legendFormat": "",
+          "range": false,
+          "instant": true,
+          "refId": "C",
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max by (customer, site, device_role, instance) (((1 - (node_filesystem_avail_bytes{customer=~\"$customer\", site=~\"$site\", fstype!~\"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs\", mountpoint!~\"/run.*|/snap.*|/var/lib/containers/storage/overlay.*\"} / (node_filesystem_size_bytes{customer=~\"$customer\", site=~\"$site\", fstype!~\"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs\", mountpoint!~\"/run.*|/snap.*|/var/lib/containers/storage/overlay.*\"} > 0))) * 100) or ((1 - (windows_logical_disk_free_bytes{customer=~\"$customer\", site=~\"$site\", volume=~\"[A-Z]:\"} / (windows_logical_disk_size_bytes{customer=~\"$customer\", site=~\"$site\", volume=~\"[A-Z]:\"} > 0))) * 100))",
+          "legendFormat": "",
+          "range": false,
+          "instant": true,
+          "refId": "D",
+          "format": "table"
         }
       ],
-      "title": "Active Firing Alerts (Fleet / Tenant)",
+      "title": "Flotten-Gesundheitsmatrix (Status, CPU, RAM, Disk & Direkt-Drill-Down)",
       "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
         {
           "id": "organize",
           "options": {
             "excludeByName": {
-              "Time": true,
-              "__name__": true,
-              "alertstate": true,
-              "Value": true
+              "Time": true
             },
             "renameByName": {
-              "alertname": "Alert",
-              "category": "Category",
-              "customer": "Customer",
-              "instance": "Instance",
-              "severity": "Severity",
-              "site": "Site"
+              "Value #A": "Status",
+              "Value #B": "CPU %",
+              "Value #C": "RAM %",
+              "Value #D": "Max. Disk %",
+              "customer": "Mandant",
+              "device_role": "Rolle",
+              "instance": "System",
+              "site": "Standort"
             }
           }
         }
       ],
-      "type": "table"
+      "type": "table",
+      "description": "Klicken Sie auf ein System, um direkt in den Server-Deep-Dive, die NS8-Pod-Ansicht oder den Log-Explorer zu wechseln."
     },
     {
       "datasource": {
@@ -612,7 +989,526 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Backup Status"
+              "options": "Schweregrad"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "critical": {
+                        "color": "red",
+                        "index": 0,
+                        "text": "KRITISCH"
+                      },
+                      "warning": {
+                        "color": "orange",
+                        "index": 1,
+                        "text": "WARNUNG"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 10,
+        "x": 14,
+        "y": 6
+      },
+      "id": 12,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ALERTS{alertstate=\"firing\", customer=~\"$customer\", site=~\"$site\"}",
+          "legendFormat": "",
+          "range": false,
+          "instant": true,
+          "refId": "A",
+          "format": "table"
+        }
+      ],
+      "title": "Aktive Alarme (Mandanten- & Flottenweit)",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "alertstate": true,
+              "Value": true
+            },
+            "renameByName": {
+              "alertname": "Alarm",
+              "category": "Kategorie",
+              "customer": "Mandant",
+              "instance": "System",
+              "severity": "Schweregrad",
+              "site": "Standort"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "id": 13,
+      "panels": [],
+      "title": "Top-10 Ressourcenverbraucher — Server & Partitionen",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 16
+      },
+      "id": 14,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "valueMode": "color"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "topk(10, (100 - (avg by (customer, site, instance) (rate(node_cpu_seconds_total{customer=~\"$customer\", site=~\"$site\", mode=\"idle\"}[5m])) * 100)) or (100 - (avg by (customer, site, instance) (rate(windows_cpu_time_total{customer=~\"$customer\", site=~\"$site\", mode=\"idle\"}[5m])) * 100)))",
+          "legendFormat": "{{customer}}/{{site}} - {{instance}}",
+          "range": false,
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Top-10 Hosts nach CPU-Auslastung (%)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 16
+      },
+      "id": 15,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "valueMode": "color"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "topk(10, ((1 - (node_memory_MemAvailable_bytes{customer=~\"$customer\", site=~\"$site\"} / (node_memory_MemTotal_bytes{customer=~\"$customer\", site=~\"$site\"} > 0))) * 100) or (100 * (1 - (windows_memory_available_bytes{customer=~\"$customer\", site=~\"$site\"} / ((windows_memory_physical_total_bytes{customer=~\"$customer\", site=~\"$site\"} or windows_cs_physical_memory_bytes{customer=~\"$customer\", site=~\"$site\"} or windows_os_visible_memory_bytes{customer=~\"$customer\", site=~\"$site\"}) > 0)))))",
+          "legendFormat": "{{customer}}/{{site}} - {{instance}}",
+          "range": false,
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Top-10 Hosts nach RAM-Auslastung (%)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 85
+              },
+              {
+                "color": "red",
+                "value": 95
+              }
+            ]
+          },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 16
+      },
+      "id": 16,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "valueMode": "color"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "topk(10, ((1 - (node_filesystem_avail_bytes{customer=~\"$customer\", site=~\"$site\", fstype!~\"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs\", mountpoint!~\"/run.*|/snap.*|/var/lib/containers/storage/overlay.*\"} / (node_filesystem_size_bytes{customer=~\"$customer\", site=~\"$site\", fstype!~\"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs\", mountpoint!~\"/run.*|/snap.*|/var/lib/containers/storage/overlay.*\"} > 0))) * 100) or ((1 - (windows_logical_disk_free_bytes{customer=~\"$customer\", site=~\"$site\", volume=~\"[A-Z]:\"} / (windows_logical_disk_size_bytes{customer=~\"$customer\", site=~\"$site\", volume=~\"[A-Z]:\"} > 0))) * 100))",
+          "legendFormat": "{{customer}}/{{site}} {{instance}} {{mountpoint}}{{volume}}",
+          "range": false,
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Top-10 Partitionen & Laufwerke nach Füllstand (%)",
+      "type": "bargauge"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 17,
+      "panels": [],
+      "title": "NethServer 8 Top-Pods (cgroups v2) & Restic-Backup-Status",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 2147483648
+              },
+              {
+                "color": "red",
+                "value": 4294967296
+              }
+            ]
+          },
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 25
+      },
+      "id": 18,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "valueMode": "color"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "topk(10, ns8_module_memory_working_set_bytes{customer=~\"$customer\", site=~\"$site\"})",
+          "legendFormat": "{{customer}}/{{site}} {{instance}} -> {{module_id}}",
+          "range": false,
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Top-10 NS8-Pods nach Working-Set-RAM",
+      "type": "bargauge",
+      "description": "Echter Working-Set-Speicherbedarf pro NS8-Modul ohne inaktiven Linux-Page-Cache."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 150
+              }
+            ]
+          },
+          "unit": "percent",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 25
+      },
+      "id": 19,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "valueMode": "color"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "topk(10, rate(ns8_module_cpu_seconds_total{customer=~\"$customer\", site=~\"$site\"}[5m]) * 100)",
+          "legendFormat": "{{customer}}/{{site}} {{instance}} -> {{module_id}}",
+          "range": false,
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Top-10 NS8-Pods nach CPU-Last (%)",
+      "type": "bargauge",
+      "description": "CPU-Verbrauch pro NS8-Modul (100% entspricht 1 voll ausgelasteten CPU-Kern)."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Backup"
             },
             "properties": [
               {
@@ -629,7 +1525,7 @@
                       "0": {
                         "color": "red",
                         "index": 0,
-                        "text": "FAILED"
+                        "text": "FEHLER"
                       },
                       "1": {
                         "color": "green",
@@ -646,7 +1542,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Last Success Age"
+              "options": "Alter"
             },
             "properties": [
               {
@@ -659,11 +1555,11 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 11,
-        "x": 13,
-        "y": 6
+        "w": 8,
+        "x": 16,
+        "y": 25
       },
-      "id": 10,
+      "id": 20,
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -704,7 +1600,7 @@
           "format": "table"
         }
       ],
-      "title": "NS8 Restic Backup Status & Last Run Age",
+      "title": "NS8 Restic-Backup-Matrix & Letzte Sicherung",
       "transformations": [
         {
           "id": "merge",
@@ -721,12 +1617,12 @@
               "device_role": true
             },
             "renameByName": {
-              "Value #A": "Backup Status",
-              "Value #B": "Last Success Age",
-              "customer": "Customer",
-              "instance": "NS8 Node",
-              "module_id": "Module",
-              "site": "Site"
+              "Value #A": "Backup",
+              "Value #B": "Alter",
+              "customer": "Mandant",
+              "instance": "NS8-Knoten",
+              "module_id": "Modul",
+              "site": "Standort"
             }
           }
         }
@@ -739,372 +1635,12 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 14
+        "y": 33
       },
-      "id": 11,
+      "id": 21,
       "panels": [],
-      "title": "NS8 & Fleet Resource Top Consumers (CPU / RAM / Disk)",
+      "title": "Live-Fehler- & Sicherheits-Logstream (Loki)",
       "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "max": 100,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 75
-              },
-              {
-                "color": "red",
-                "value": 90
-              }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 15
-      },
-      "id": 12,
-      "options": {
-        "displayMode": "lcd",
-        "minVizHeight": 16,
-        "minVizWidth": 8,
-        "namePlacement": "auto",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showUnfilled": true,
-        "valueMode": "color"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "topk(10, 100 - (avg by (customer, site, instance) (rate(node_cpu_seconds_total{customer=~\"$customer\", site=~\"$site\", mode=\"idle\"}[5m])) * 100))",
-          "legendFormat": "{{customer}}/{{site}} - {{instance}}",
-          "range": false,
-          "instant": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Top 10 CPU Consumers (%)",
-      "type": "bargauge"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "max": 100,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 80
-              },
-              {
-                "color": "red",
-                "value": 90
-              }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 15
-      },
-      "id": 13,
-      "options": {
-        "displayMode": "lcd",
-        "minVizHeight": 16,
-        "minVizWidth": 8,
-        "namePlacement": "auto",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showUnfilled": true,
-        "valueMode": "color"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "topk(10, (1 - (node_memory_MemAvailable_bytes{customer=~\"$customer\", site=~\"$site\"} / (node_memory_MemTotal_bytes{customer=~\"$customer\", site=~\"$site\"} > 0))) * 100)",
-          "legendFormat": "{{customer}}/{{site}} - {{instance}}",
-          "range": false,
-          "instant": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Top 10 Memory Consumers (%)",
-      "type": "bargauge"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "max": 100,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 85
-              },
-              {
-                "color": "red",
-                "value": 95
-              }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 15
-      },
-      "id": 14,
-      "options": {
-        "displayMode": "lcd",
-        "minVizHeight": 16,
-        "minVizWidth": 8,
-        "namePlacement": "auto",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showUnfilled": true,
-        "valueMode": "color"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "topk(10, (1 - (node_filesystem_avail_bytes{customer=~\"$customer\", site=~\"$site\", fstype!~\"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs\", mountpoint!~\"/run.*|/snap.*|/var/lib/containers/storage/overlay.*\"} / (node_filesystem_size_bytes{customer=~\"$customer\", site=~\"$site\", fstype!~\"tmpfs|devtmpfs|squashfs|iso9660|overlay|fuse.*|nsfs\", mountpoint!~\"/run.*|/snap.*|/var/lib/containers/storage/overlay.*\"} > 0))) * 100)",
-          "legendFormat": "{{customer}}/{{site}} {{instance}}:{{mountpoint}}",
-          "range": false,
-          "instant": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Top 10 Partition Space Usage (%)",
-      "type": "bargauge"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 23
-      },
-      "id": 15,
-      "panels": [],
-      "title": "NS8 Rootless Module Containers & Live Error Log Stream",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Running"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background"
-                }
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "options": {
-                      "0": {
-                        "color": "red",
-                        "index": 0,
-                        "text": "STOPPED"
-                      },
-                      "1": {
-                        "color": "green",
-                        "index": 1,
-                        "text": "RUNNING"
-                      }
-                    },
-                    "type": "value"
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 12,
-        "x": 0,
-        "y": 24
-      },
-      "id": 16,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
-        "showHeader": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "ns8_container_running{customer=~\"$customer\", site=~\"$site\"} or ns8_container_info{customer=~\"$customer\", site=~\"$site\"}",
-          "legendFormat": "",
-          "range": false,
-          "instant": true,
-          "refId": "A",
-          "format": "table"
-        }
-      ],
-      "title": "NS8 Rootless Module Containers Inventory",
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true,
-              "__name__": true,
-              "job": true,
-              "device_role": true,
-              "collector_id": true
-            },
-            "renameByName": {
-              "Value": "Running",
-              "container": "Container",
-              "customer": "Customer",
-              "image": "Image",
-              "instance": "NS8 Node",
-              "module_id": "Module ID",
-              "site": "Site"
-            }
-          }
-        }
-      ],
-      "type": "table"
     },
     {
       "datasource": {
@@ -1117,11 +1653,11 @@
       },
       "gridPos": {
         "h": 9,
-        "w": 12,
-        "x": 12,
-        "y": 24
+        "w": 24,
+        "x": 0,
+        "y": 34
       },
-      "id": 17,
+      "id": 22,
       "options": {
         "dedupStrategy": "none",
         "enableLogDetails": true,
@@ -1139,13 +1675,14 @@
             "uid": "loki"
           },
           "editorMode": "code",
-          "expr": "{customer=~\"$customer\", site=~\"$site\"} |~ \"(?i)(error|crit|fatal|panic|failed)\"",
+          "expr": "{customer=~\"$customer\", site=~\"$site\"} |~ \"(?i)(emerg|alert|crit|err|error|fatal|panic|oom|failed)\"",
           "queryType": "range",
           "refId": "A"
         }
       ],
-      "title": "Live Error & Critical Logs (Loki — NS8 & Fleet)",
-      "type": "logs"
+      "title": "Live-Fehler- & Kritische Systemmeldungen (Flottenweit)",
+      "type": "logs",
+      "description": "Echtzeit-Stream kritischer Ereignisse über alle NS8-Cluster, Server und Appliances."
     }
   ],
   "refresh": "30s",
@@ -1155,7 +1692,8 @@
     "msp",
     "ns8",
     "overview",
-    "fleet"
+    "fleet",
+    "noc"
   ],
   "templating": {
     "list": [
@@ -1175,10 +1713,10 @@
           "uid": "prometheus"
         },
         "definition": "label_values(up, customer)",
-        "description": "Mandant / Customer Tenant",
+        "description": "Mandanten-Filter (Tenant)",
         "hide": 0,
         "includeAll": true,
-        "label": "Customer",
+        "label": "Mandant",
         "multi": true,
         "name": "customer",
         "options": [],
@@ -1208,10 +1746,10 @@
           "uid": "prometheus"
         },
         "definition": "label_values(up{customer=~\"$customer\"}, site)",
-        "description": "Standort / Customer Site",
+        "description": "Standort-Filter (Site)",
         "hide": 0,
         "includeAll": true,
-        "label": "Site",
+        "label": "Standort",
         "multi": true,
         "name": "site",
         "options": [],
@@ -1233,8 +1771,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "NS8 Multi-Cluster & MSP Fleet Overview",
+  "title": "NS8 & MSP Gesamtübersicht",
   "uid": "ns8-multi-cluster-overview",
-  "version": 1,
+  "version": 2,
   "weekStart": "monday"
 }

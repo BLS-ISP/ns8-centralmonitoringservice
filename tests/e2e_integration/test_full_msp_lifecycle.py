@@ -374,9 +374,19 @@ async def test_02_multi_tenant_creation_alertmanager_and_grafana_cross_hooks(
         org1_loki["secureJsonData"]["httpHeaderValue1"]
         == "acme-gmbh|victim-gmbh|_msp_internal"
     )
-    assert len(gf.dashboards[1]) == 4
+    expected_dash_uids = {
+        "ns8-multi-cluster-overview",
+        "ns8-pods-and-modules",
+        "linux-windows-servers",
+        "proxmox-snmp-infrastructure",
+        "web-ssl-uptime",
+        "central-log-explorer",
+    }
+    assert len(gf.dashboards[1]) == 6
+    assert set(gf.dashboards[1].keys()) == expected_dash_uids
 
     acme_oid = acme_out["grafana_org_id"]
+    assert set(gf.dashboards[acme_oid].keys()) == expected_dash_uids
     cust_prom = gf.datasources[acme_oid]["prometheus"]
     cust_loki = gf.datasources[acme_oid]["loki"]
     assert cust_prom["url"] == "http://127.0.0.1:9095"
@@ -3497,6 +3507,335 @@ async def test_13_v104_multi_select_ldap_group_and_user_discovery(
         ]
     finally:
         ldap_srv.stop()
+
+
+def _write_cgroup_slice_files(
+    cg_dir: Path,
+    *,
+    usage_usec: int = 0,
+    throttled_usec: int = 0,
+    mem_current: int = 0,
+    inactive_file: int = 0,
+    mem_swap: int = 0,
+    mem_max: str = "max",
+    oom_kill: int = 0,
+    pids: int = 0,
+    rbytes: int = 0,
+    wbytes: int = 0,
+) -> None:
+    cg_dir.mkdir(parents=True, exist_ok=True)
+    (cg_dir / "cpu.stat").write_bytes(
+        f"usage_usec {usage_usec}\nthrottled_usec {throttled_usec}\n".encode("utf-8")
+    )
+    (cg_dir / "memory.current").write_bytes(f"{mem_current}\n".encode("utf-8"))
+    (cg_dir / "memory.stat").write_bytes(f"inactive_file {inactive_file}\n".encode("utf-8"))
+    (cg_dir / "memory.swap.current").write_bytes(f"{mem_swap}\n".encode("utf-8"))
+    (cg_dir / "memory.max").write_bytes(f"{mem_max}\n".encode("utf-8"))
+    (cg_dir / "memory.events").write_bytes(f"oom 0\noom_kill {oom_kill}\n".encode("utf-8"))
+    (cg_dir / "pids.current").write_bytes(f"{pids}\n".encode("utf-8"))
+    (cg_dir / "io.stat").write_bytes(f"253:0 rbytes={rbytes} wbytes={wbytes}\n".encode("utf-8"))
+
+
+@pytest.mark.asyncio
+async def test_14_v110_cgroups_v2_pod_metrics_hub_self_monitoring_and_6_noc_dashboards(
+    tmp_path: Path, live_backends: LiveObservabilityBackends
+) -> None:
+    """Verify v1.1.0 rootless cgroups-v2 NS8 pod metrics, Hub `:9097/metrics/ns8-node`, and 6 NOC dashboards."""
+    fake_cgroup = tmp_path / "fake_cgroup_v2"
+    fake_passwd = tmp_path / "fake_passwd"
+    fake_proc = tmp_path / "fake_proc"
+    fake_proc.mkdir(parents=True, exist_ok=True)
+
+    fake_passwd.write_bytes(
+        (
+            "root:x:0:0:root:/root:/bin/bash\n"
+            "mail1:x:1001:1001:NS8 Mail:/home/mail1:/bin/bash\n"
+            "nextcloud1:x:1002:1002:NS8 Nextcloud:/home/nextcloud1:/bin/bash\n"
+            "nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n"
+        ).encode("utf-8")
+    )
+
+    # 1. Build synthetic cgroups-v2 tree:
+    #    - `mail1` (rootless UID 1001) with `dovecot.service`, `clamd.service`, and ignored `dbus.service`
+    #    - `nextcloud1` (rootless UID 1002) with `oom_kill 2`
+    #    - `samba1` (rootful `system.slice/samba1.service`)
+    mail_slice = fake_cgroup / "user.slice" / "user-1001.slice"
+    _write_cgroup_slice_files(
+        mail_slice,
+        usage_usec=42_500_000,
+        throttled_usec=500_000,
+        mem_current=800_000_000,
+        inactive_file=200_000_000,
+        mem_swap=1_048_576,
+        mem_max="2147483648",
+        oom_kill=0,
+        pids=28,
+        rbytes=12_000_000,
+        wbytes=4_500_000,
+    )
+    mail_app_slice = mail_slice / "user@1001.service" / "app.slice"
+    _write_cgroup_slice_files(
+        mail_app_slice / "dovecot.service",
+        usage_usec=15_000_000,
+        mem_current=220_000_000,
+        inactive_file=20_000_000,
+        pids=8,
+    )
+    _write_cgroup_slice_files(
+        mail_app_slice / "clamd.service",
+        usage_usec=22_000_000,
+        mem_current=450_000_000,
+        inactive_file=50_000_000,
+        pids=6,
+    )
+    _write_cgroup_slice_files(
+        mail_app_slice / "dbus.service",
+        usage_usec=100_000,
+        mem_current=4_000_000,
+        pids=1,
+    )
+
+    nc_slice = fake_cgroup / "user.slice" / "user-1002.slice"
+    _write_cgroup_slice_files(
+        nc_slice,
+        usage_usec=18_000_000,
+        mem_current=1_200_000_000,
+        inactive_file=100_000_000,
+        oom_kill=2,
+        pids=35,
+    )
+
+    samba_slice = fake_cgroup / "system.slice" / "samba1.service"
+    _write_cgroup_slice_files(
+        samba_slice,
+        usage_usec=8_500_000,
+        mem_current=512_000_000,
+        inactive_file=64_000_000,
+        pids=19,
+    )
+
+    # Minimal synthetic `/proc` files for Hub host telemetry
+    (fake_proc / "stat").write_bytes(
+        b"cpu  1000 20 300 8000 50 0 10 5 0 0\ncpu0 1000 20 300 8000 50 0 10 5 0 0\nbtime 1763000000\n"
+    )
+    (fake_proc / "meminfo").write_bytes(
+        (
+            "MemTotal:       16384000 kB\n"
+            "MemFree:         4096000 kB\n"
+            "MemAvailable:    8192000 kB\n"
+            "Buffers:          512000 kB\n"
+            "Cached:          3584000 kB\n"
+            "SwapTotal:       2097152 kB\n"
+            "SwapFree:        2097152 kB\n"
+        ).encode("utf-8")
+    )
+    (fake_proc / "loadavg").write_bytes(b"0.42 0.35 0.28 2/410 12345\n")
+    (fake_proc / "vmstat").write_bytes(b"oom_kill 0\n")
+
+    cg_env = {
+        "NS8_CGROUP_ROOT": str(fake_cgroup),
+        "NS8_PASSWD_FILE": str(fake_passwd),
+        "NS8_PROC_ROOT": str(fake_proc),
+    }
+
+    # 2. Verify Collector `bin/collect-ns8-metrics` harvests the full cgroups-v2 tree without root
+    collector = NS8ModuleInstance(
+        kind="collector",
+        install_dir=tmp_path / "collector_v110_home",
+        module_id="central-monitoring-collector1",
+        backends=live_backends,
+    )
+    await collector.run_script("actions/create-module/20initialize")
+    await collector.run_script("bin/collect-ns8-metrics", validate_io=False, extra_env=cg_env)
+
+    col_prom = (collector.state_dir / "textfile" / "ns8.prom").read_text(encoding="utf-8")
+    for expected_sample in (
+        'ns8_module_up{module_id="mail1",module_type="rootless"} 1',
+        'ns8_module_cpu_seconds_total{module_id="mail1",module_type="rootless"} 42.5',
+        'ns8_module_cpu_throttled_seconds_total{module_id="mail1",module_type="rootless"} 0.5',
+        'ns8_module_memory_working_set_bytes{module_id="mail1",module_type="rootless"} 600000000',
+        'ns8_module_memory_bytes{module_id="mail1",module_type="rootless"} 800000000',
+        'ns8_module_memory_swap_bytes{module_id="mail1",module_type="rootless"} 1048576',
+        'ns8_module_memory_limit_bytes{module_id="mail1",module_type="rootless"} 2147483648',
+        'ns8_module_io_read_bytes_total{module_id="mail1",module_type="rootless"} 12000000',
+        'ns8_module_io_write_bytes_total{module_id="mail1",module_type="rootless"} 4500000',
+        'ns8_module_pids{module_id="mail1",module_type="rootless"} 28',
+        'ns8_module_oom_kills_total{module_id="nextcloud1",module_type="rootless"} 2',
+        'ns8_module_up{module_id="samba1",module_type="rootful"} 1',
+        'ns8_pod_unit_memory_working_set_bytes{module_id="mail1",unit="dovecot"} 200000000',
+        'ns8_pod_unit_memory_working_set_bytes{module_id="mail1",unit="clamd"} 400000000',
+        'ns8_container_running{module_id="mail1",container="dovecot"} 1',
+        'ns8_container_running{module_id="mail1",container="clamd"} 1',
+    ):
+        assert expected_sample in col_prom, f"Collector ns8.prom missing: {expected_sample}"
+    assert 'unit="dbus"' not in col_prom
+
+    # 3. Simulate Grafana 11 file-provisioned Org 1 (`400 Cannot save provisioned dashboard`),
+    #    configure Hub self-monitoring (`monitor_local_ns8_node=True`, `local_node_customer="bls-isp"`),
+    #    and verify live `:9097/metrics/ns8-node` vs public `:8080` block!
+    gf = live_backends.grafana
+    gf.simulate_org1_file_provisioned = True
+    msp_support_uid = gf.add_org1_user(
+        login="msp.noc",
+        email="noc@bls-isp.net",
+        org1_role="Editor",
+        is_external=True,
+        is_grafana_admin=False,
+    )
+
+    hub = NS8ModuleInstance(
+        kind="hub",
+        install_dir=tmp_path / "hub_v110_home",
+        module_id="central-monitoring-hub1",
+        tcp_port=20080,
+        backends=live_backends,
+    )
+    await hub.run_script("actions/create-module/20initialize")
+
+    v110_cfg_on = {
+        "host": "monitoring.bls-isp.net",
+        "lets_encrypt": True,
+        "http2https": True,
+        "storage_mode": "local",
+        "monitor_local_ns8_node": True,
+        "local_node_customer": "bls-isp",
+        "local_node_site": "hub",
+        "grafana_admin_password": "MspV110AdminPassword!",
+    }
+    await hub.run_script("actions/configure-module/01hostname-validation", v110_cfg_on)
+    await hub.run_script("actions/configure-module/20configure", v110_cfg_on, extra_env=cg_env)
+    await hub.run_script("actions/configure-module/80start_services", v110_cfg_on)
+
+    _, _, _, read_on = await hub.run_script("actions/get-configuration/20read", {})
+    assert read_on["monitor_local_ns8_node"] is True
+    assert read_on["local_node_customer"] == "bls-isp"
+    assert read_on["local_node_site"] == "hub"
+    assert hub.read_meta()["systemctl_state"]["hub-ns8-metrics.timer"] == "active"
+
+    prom_yml_on = (hub.config_dir / "prometheus" / "prometheus.yml").read_text(encoding="utf-8")
+    assert "job_name: hub-ns8-node" in prom_yml_on
+    assert "metrics_path: /metrics/ns8-node" in prom_yml_on
+    assert '"127.0.0.1:9097"' in prom_yml_on
+    assert 'customer: "bls-isp"' in prom_yml_on
+    assert 'site: "hub"' in prom_yml_on
+    assert 'collector_id: "hub-local"' in prom_yml_on
+
+    v110_gw = await live_backends.start_hub_gateway(hub.state_dir, tmp_path / "v110_gw_tls")
+    v110_ssl = ssl.create_default_context(cafile=str(v110_gw.ca_cert_path))
+
+    async with aiohttp.ClientSession() as session:
+        # Loopback `:9097/metrics/ns8-node` serves full host + cgroups-v2 exposition
+        async with session.get(f"{v110_gw.relay_url}/metrics/ns8-node") as relay_resp:
+            assert relay_resp.status == 200
+            relay_body = await relay_resp.text()
+            for expected_hub_sample in (
+                "node_memory_MemTotal_bytes",
+                'ns8_module_up{module_id="mail1",module_type="rootless"} 1',
+                'ns8_module_memory_working_set_bytes{module_id="mail1",module_type="rootless"} 600000000',
+                'ns8_module_oom_kills_total{module_id="nextcloud1",module_type="rootless"} 2',
+                'ns8_module_up{module_id="samba1",module_type="rootful"} 1',
+                'ns8_pod_unit_memory_working_set_bytes{module_id="mail1",unit="dovecot"} 200000000',
+                'ns8_pod_unit_memory_working_set_bytes{module_id="mail1",unit="clamd"} 400000000',
+            ):
+                assert expected_hub_sample in relay_body, (
+                    f"Hub /metrics/ns8-node missing: {expected_hub_sample}"
+                )
+            assert 'unit="dbus"' not in relay_body
+
+        # Public `hub-gateway` (`:8080`) MUST NEVER expose `/metrics/ns8-node` or `/metrics`!
+        for pub_path in (
+            "/metrics/ns8-node",
+            "/metrics",
+            "/api/datasources/proxy/uid/prometheus/metrics/ns8-node",
+        ):
+            async with session.get(
+                f"{v110_gw.https_url}{pub_path}",
+                ssl=v110_ssl,
+            ) as blocked_pub_resp:
+                assert blocked_pub_resp.status in (403, 404), (
+                    f"Public gateway exposed {pub_path}: status={blocked_pub_resp.status}"
+                )
+
+    # 4. Provision Customer Org `bls-isp` + portal user while `simulate_org1_file_provisioned=True`:
+    #    verify `/api/admin/provisioning/dashboards/reload` ran, `400 Cannot save provisioned dashboard`
+    #    in Org 1 was gracefully tolerated, and ALL 6 locked dashboards + users synced to `bls_oid`!
+    _, _, _, bls_saved = await hub.run_script(
+        "actions/save-tenant/20save",
+        {
+            "customer": "bls-isp",
+            "display_name": "BLS ISP Internal",
+            "sites": ["hub", "hq"],
+            "contact_emails": ["noc@bls-isp.net"],
+            "customer_portal_enabled": True,
+        },
+    )
+    bls_oid = int(bls_saved["grafana_org_id"])
+    assert bls_oid > 1
+
+    _, _, _, bls_user_out = await hub.run_script(
+        "actions/save-portal-user/20save",
+        {
+            "customer": "bls-isp",
+            "username": "bls.portal",
+            "role": "Viewer",
+            "password": "BlsPortalPassword!2026",
+        },
+    )
+    assert bls_user_out["grafana_synced"] is True
+
+    assert gf.dashboard_reloads >= 1
+    assert gf.org1_provisioned_rejections >= 6
+
+    expected_6_uids = {
+        "ns8-multi-cluster-overview",
+        "ns8-pods-and-modules",
+        "linux-windows-servers",
+        "proxmox-snmp-infrastructure",
+        "web-ssl-uptime",
+        "central-log-explorer",
+    }
+    assert set(gf.dashboards[bls_oid].keys()) == expected_6_uids
+    for uid, dash_model in gf.dashboards[bls_oid].items():
+        assert dash_model["editable"] is False, f"Dashboard {uid} must be non-editable in Customer Org"
+        cust_vars = [
+            v
+            for v in dash_model.get("templating", {}).get("list", [])
+            if isinstance(v, dict) and v.get("name") == "customer"
+        ]
+        assert len(cust_vars) == 1
+        assert cust_vars[0]["type"] == "constant"
+        assert cust_vars[0]["query"] == "bls-isp"
+        assert cust_vars[0]["hide"] == 2
+
+    log_dash_vars = {
+        v["name"]: v
+        for v in gf.dashboards[bls_oid]["central-log-explorer"].get("templating", {}).get("list", [])
+        if isinstance(v, dict) and "name" in v
+    }
+    assert log_dash_vars["log_search"]["type"] == "textbox"
+    assert log_dash_vars["site"]["type"] != "constant"
+
+    bls_portal_uid = next(u["id"] for u in gf.users.values() if u["login"] == "bls.portal")
+    assert gf.org_members[bls_oid] == {
+        1: "Admin",
+        msp_support_uid: "Viewer",
+        bls_portal_uid: "Viewer",
+    }
+    assert bls_portal_uid not in gf.org_members[1]
+
+    # 5. Toggle `monitor_local_ns8_node=False` -> verify `hub-ns8-node` removed from `prometheus.yml`
+    #    and `hub-ns8-metrics.timer` stopped/disabled!
+    v110_cfg_off = dict(v110_cfg_on)
+    v110_cfg_off["monitor_local_ns8_node"] = False
+    await hub.run_script("actions/configure-module/20configure", v110_cfg_off, extra_env=cg_env)
+    await hub.run_script("actions/configure-module/80start_services", v110_cfg_off)
+
+    _, _, _, read_off = await hub.run_script("actions/get-configuration/20read", {})
+    assert read_off["monitor_local_ns8_node"] is False
+    prom_yml_off = (hub.config_dir / "prometheus" / "prometheus.yml").read_text(encoding="utf-8")
+    assert "hub-ns8-node" not in prom_yml_off
+    assert hub.read_meta()["systemctl_state"]["hub-ns8-metrics.timer"] == "inactive"
+
 
 
 

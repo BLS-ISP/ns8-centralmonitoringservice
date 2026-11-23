@@ -12,6 +12,8 @@ if str(_PYPKG) not in sys.path:
 
 from hub_core import (  # noqa: E402
     CORE_CONTAINER_SERVICES,
+    METRICS_SERVICE_UNIT,
+    METRICS_TIMER_UNIT,
     POD_SERVICE,
     THANOS_SERVICES,
     resolve_state_dir,
@@ -43,7 +45,13 @@ def main() -> int:
     except Exception:
         pass
 
-    all_units = (*THANOS_SERVICES, *CORE_CONTAINER_SERVICES, POD_SERVICE)
+    all_units = (
+        METRICS_TIMER_UNIT,
+        METRICS_SERVICE_UNIT,
+        *THANOS_SERVICES,
+        *CORE_CONTAINER_SERVICES,
+        POD_SERVICE,
+    )
     for unit in all_units:
         agent.run_helper("systemctl", "--user", "stop", unit)
     agent.run_helper("systemctl", "--user", "disable", *all_units)

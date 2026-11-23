@@ -440,6 +440,9 @@ def test_all_17_hub_actions_invoked_across_views() -> None:
                 "ldap_editor_group": "CN=MSP Technicians,CN=Users,DC=ad,DC=msp,DC=example,DC=com",
                 "ldap_viewer_group": "CN=MSP Viewers,CN=Users,DC=ad,DC=msp,DC=example,DC=com",
                 "grafana_admin_password": "StrongAdminPassword123!",
+                "monitor_local_ns8_node": True,
+                "local_node_customer": "_msp_internal",
+                "local_node_site": "hub",
             },
         ),
         (
@@ -692,6 +695,9 @@ def test_view_payload_keys_match_input_schema_properties() -> None:
         "ldap_admin_group",
         "ldap_editor_group",
         "ldap_viewer_group",
+        "monitor_local_ns8_node",
+        "local_node_customer",
+        "local_node_site",
     ):
         assert f"{ldap_key}:" in settings_src, f"Settings.vue missing {ldap_key}"
 
@@ -845,8 +851,8 @@ def test_v104_settings_ldap_multiselect_groups_users_and_tester() -> None:
     """Verify v1.0.4 AD/LDAP live group+user discovery, NsMultiSelect pickers, and interactive user tester."""
     pkg_data = json.loads((HUB_UI_ROOT / "package.json").read_text(encoding="utf-8"))
     cfg_data = json.loads((HUB_UI_ROOT / "public" / "config.json").read_text(encoding="utf-8"))
-    assert pkg_data["version"] == "1.0.4"
-    assert cfg_data["version"] == "1.0.4"
+    assert pkg_data["version"] == "1.1.0"
+    assert cfg_data["version"] == "1.1.0"
 
     settings_src = (HUB_SRC_ROOT / "views" / "Settings.vue").read_text(encoding="utf-8")
     for token in (
@@ -952,6 +958,9 @@ def test_v104_settings_ldap_multiselect_groups_users_and_tester() -> None:
             "ldap_viewer_principals": [],
             "available_ldap_domains": ["ad.bls-isp.net"],
             "has_grafana_admin_password": True,
+            "monitor_local_ns8_node": True,
+            "local_node_customer": "_msp_internal",
+            "local_node_site": "hub",
             "grafana_url": "https://monitoring.msp.example.com",
             "ingest_metrics_url": "https://monitoring.msp.example.com/api/v1/ingest/metrics",
             "ingest_logs_url": "https://monitoring.msp.example.com/api/v1/ingest/logs",
@@ -1039,3 +1048,44 @@ def test_v102_tenants_portal_explanation_and_multi_user_manager() -> None:
         },
         schema=list_users_out_schema,
     )
+
+
+def test_v110_hub_self_monitoring_settings_and_dashboard_quick_links() -> None:
+    """Verify v1.1.0 Hub Self-Monitoring Settings controls and Status.vue dashboard deep-links."""
+    status_src = (HUB_SRC_ROOT / "views" / "Status.vue").read_text(encoding="utf-8")
+    settings_src = (HUB_SRC_ROOT / "views" / "Settings.vue").read_text(encoding="utf-8")
+
+    for link_token in (
+        "/d/ns8-pods-and-modules?orgId=1",
+        "/d/central-log-explorer?orgId=1",
+        "open_ns8_pods_dashboard",
+        "open_log_explorer_dashboard",
+        "openGrafanaPath",
+    ):
+        assert link_token in status_src, f"Status.vue missing v1.1.0 token {link_token}"
+
+    for self_mon_token in (
+        "monitor_local_ns8_node",
+        "local_node_customer",
+        "local_node_site",
+        "_msp_internal",
+        "loadTenantsLookup",
+        '"list-tenants"',
+        "localNodeCustomerSelectOptions",
+    ):
+        assert self_mon_token in settings_src, f"Settings.vue missing v1.1.0 token {self_mon_token}"
+
+    cfg_in_schema = _load_schema("hub-configure-module-input.json")
+    for customer_slug, site_slug in (("_msp_internal", "hub"), ("bls-isp", "dc1")):
+        jsonschema.validate(
+            instance={
+                "host": "monitoring.msp.example.com",
+                "lets_encrypt": True,
+                "http2https": True,
+                "storage_mode": "local",
+                "monitor_local_ns8_node": True,
+                "local_node_customer": customer_slug,
+                "local_node_site": site_slug,
+            },
+            schema=cfg_in_schema,
+        )
