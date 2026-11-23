@@ -214,6 +214,7 @@ def ns8_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeNS8Env:
         "LDAP_DOMAIN",
         "LDAP_ADMIN_GROUP",
         "LDAP_EDITOR_GROUP",
+        "LDAP_VIEWER_GROUP",
     ):
         monkeypatch.delenv(key, raising=False)
 

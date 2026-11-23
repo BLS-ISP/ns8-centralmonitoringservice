@@ -69,18 +69,6 @@
   "allOf": [
     {
       "if": {
-        "properties": { "customer_portal_enabled": { "const": true } },
-        "required": ["customer_portal_enabled"]
-      },
-      "then": {
-        "required": ["portal_viewer_username"],
-        "properties": {
-          "portal_viewer_username": { "minLength": 3 }
-        }
-      }
-    },
-    {
-      "if": {
         "properties": { "portal_viewer_password": { "minLength": 1 } },
         "required": ["portal_viewer_password"]
       },

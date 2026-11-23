@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-save-portal-user-output.json",
+  "title": "central-monitoring-hub save-portal-user output",
+  "type": "object",
+  "required": [
+    "status",
+    "customer",
+    "grafana_login_url",
+    "grafana_org_name",
+    "grafana_synced",
+    "user"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "status": { "type": "string", "enum": ["saved"] },
+    "customer": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$"
+    },
+    "grafana_org_id": { "type": ["integer", "null"] },
+    "grafana_login_url": { "type": "string" },
+    "grafana_org_name": { "type": "string" },
+    "grafana_synced": { "type": "boolean" },
+    "user": {
+      "type": "object",
+      "required": [
+        "username",
+        "full_name",
+        "email",
+        "role",
+        "disabled",
+        "created_at",
+        "updated_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "username": { "type": "string" },
+        "full_name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["Viewer", "Editor"] },
+        "disabled": { "type": "boolean" },
+        "created_at": { "type": "string" },
+        "updated_at": { "type": "string" }
+      }
+    }
+  }
+}

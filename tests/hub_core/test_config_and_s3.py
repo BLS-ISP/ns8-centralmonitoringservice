@@ -71,6 +71,8 @@ def test_local_mode_config_rendering_disables_s3_and_points_to_prometheus(ns8_en
     assert "http_port = 3000" in grafana_ini
     assert "domain = hub.msp.example.com" in grafana_ini
     assert "allow_sign_up = false" in grafana_ini
+    assert "[alerting]\nenabled = false" in grafana_ini
+    assert "[unified_alerting]\nenabled = false" in grafana_ini
 
     # Starter dashboards copied into config/grafana/dashboards
     dashboards = list((ns8_env.config_dir / "grafana" / "dashboards").glob("*.json"))

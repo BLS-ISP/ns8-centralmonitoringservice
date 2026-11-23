@@ -30,8 +30,10 @@ from hub_gateway.snappy_codec import snappy_compress
 from hub_tenancy.store import load_portal_viewer_secret
 from tests.e2e_integration.harness import (
     REPO_ROOT,
+    LiveBERLDAPv3Server,
     LiveObservabilityBackends,
     NS8ModuleInstance,
+    build_ad_object_sid,
     parse_prom_textfile_to_timeseries,
 )
 
@@ -2247,6 +2249,571 @@ async def test_10_live_ns8_probe_restore_clone_and_py39_compat(
         p.name for p in (cloned_hub.config_dir / "prometheus" / "rules").glob("*.yml")
     )
     assert cloned_rules == ["ns8-cluster.yml", "proxmox-ve.yml"]
+
+
+@pytest.mark.asyncio
+async def test_11_v102_live_ad_ldap_discovery_tester_and_multi_user_customer_portal(
+    tmp_path: Path, live_backends: LiveObservabilityBackends
+) -> None:
+    """Verify v1.0.2 live AD LDAPv3 group discovery/login tester, Viewer SSO, and multi-user Customer Portals."""
+    base_dn = "DC=ad,DC=bls-isp,DC=net"
+    bind_dn = f"CN=ldapsvc,CN=Users,{base_dn}"
+    bind_pw = "AdBlsIspBindSecret!2026"
+
+    da_dn = f"CN=Domain Admins,CN=Users,{base_dn}"
+    du_dn = f"CN=Domain Users,CN=Users,{base_dn}"
+    ops_dn = f"CN=MSP Operations,OU=Groups,{base_dn}"
+    noc_dn = f"CN=MSP Tier-1 NOC,OU=SubTeams,OU=Groups,{base_dn}"
+    ro_dn = f"CN=MSP ReadOnly,OU=Groups,{base_dn}"
+
+    genera_dn = f"CN=Genera,OU=MSP,{base_dn}"
+    nested_dn = f"CN=Nora Engineer,OU=MSP,{base_dn}"
+    viewer_dn = f"CN=Viktor Auditor,OU=MSP,{base_dn}"
+
+    ad_entries = [
+        {
+            "dn": da_dn,
+            "attrs": {
+                "objectClass": ["top", "group"],
+                "cn": "Domain Admins",
+                "sAMAccountName": "Domain Admins",
+                "description": "Designated administrators of the domain",
+                "primaryGroupToken": "512",
+                "member": [genera_dn],
+            },
+        },
+        {
+            "dn": du_dn,
+            "attrs": {
+                "objectClass": ["top", "group"],
+                "cn": "Domain Users",
+                "sAMAccountName": "Domain Users",
+                "description": "All domain users",
+                "objectSid": build_ad_object_sid(513),
+                "member": [],
+            },
+        },
+        {
+            "dn": ops_dn,
+            "attrs": {
+                "objectClass": ["top", "group"],
+                "cn": "MSP Operations",
+                "sAMAccountName": "MSP-Operations",
+                "description": "MSP Org 1 Editor team",
+                "member": [noc_dn],
+            },
+        },
+        {
+            "dn": noc_dn,
+            "attrs": {
+                "objectClass": ["top", "group"],
+                "cn": "MSP Tier-1 NOC",
+                "sAMAccountName": "MSP-Tier1-NOC",
+                "description": "Nested child NOC group",
+                "member": [nested_dn],
+            },
+        },
+        {
+            "dn": ro_dn,
+            "attrs": {
+                "objectClass": ["top", "group"],
+                "cn": "MSP ReadOnly",
+                "sAMAccountName": "MSP-ReadOnly",
+                "description": "MSP Org 1 Viewer audit group",
+                "member": [viewer_dn],
+            },
+        },
+        {
+            "dn": genera_dn,
+            "attrs": {
+                "objectClass": ["top", "person", "organizationalPerson", "user"],
+                "cn": "Genera",
+                "displayName": "Genera MSP Superadmin",
+                "sAMAccountName": "Genera",
+                "userPrincipalName": "Genera@ad.bls-isp.net",
+                "mail": "genera@bls-isp.net",
+                "memberOf": [da_dn],
+                "primaryGroupID": "513",
+            },
+        },
+        {
+            "dn": nested_dn,
+            "attrs": {
+                "objectClass": ["top", "person", "organizationalPerson", "user"],
+                "cn": "Nora Engineer",
+                "givenName": "Nora",
+                "sn": "Engineer",
+                "sAMAccountName": "n.engineer",
+                "userPrincipalName": "n.engineer@ad.bls-isp.net",
+                "mail": "nora@bls-isp.net",
+                "memberOf": [noc_dn],
+                "primaryGroupID": "513",
+            },
+        },
+        {
+            "dn": viewer_dn,
+            "attrs": {
+                "objectClass": ["top", "person", "organizationalPerson", "user"],
+                "cn": "Viktor Auditor",
+                "displayName": "Viktor ReadOnly Auditor",
+                "sAMAccountName": "v.auditor",
+                "userPrincipalName": "v.auditor@ad.bls-isp.net",
+                "mail": "viktor@bls-isp.net",
+                "memberOf": [ro_dn],
+                "primaryGroupID": "513",
+            },
+        },
+    ]
+
+    ldap_srv = LiveBERLDAPv3Server(
+        expected_bind_dn=bind_dn,
+        expected_bind_pw=bind_pw,
+        entries=ad_entries,
+        max_page_size=2,
+        emit_referral=True,
+    )
+    ldap_srv.start()
+    try:
+        ad_domain_cfg = {
+            "host": "127.0.0.1",
+            "port": str(ldap_srv.port),
+            "schema": "ad",
+            "base_dn": base_dn,
+            "bind_dn": bind_dn,
+            "bind_password": bind_pw,
+            "tls": False,
+        }
+
+        hub = NS8ModuleInstance(
+            kind="hub",
+            install_dir=tmp_path / "hub_v102_src",
+            module_id="central-monitoring-hub1",
+            tcp_port=20080,
+            backends=live_backends,
+        )
+        hub.set_ldap_domain("ad.bls-isp.net", ad_domain_cfg)
+
+        await hub.run_script("actions/create-module/20initialize")
+        _, _, _, init_cfg = await hub.run_script("actions/get-configuration/20read", {})
+        assert "ad.bls-isp.net" in init_cfg["available_ldap_domains"]
+        assert init_cfg["ldap_viewer_group"] == ""
+
+        # 1. Live `discover-ldap-groups` action over RFC 4511 BER + RFC 2696 paging + AD referral skip
+        _, _, _, disc = await hub.run_script(
+            "actions/discover-ldap-groups/20read",
+            {"domain": "ad.bls-isp.net"},
+        )
+        assert disc["ok"] is True
+        assert disc["schema"] == "ad"
+        assert disc["base_dn"] == base_dn
+        assert len(disc["groups"]) == 5
+        groups_by_name = {g["name"]: g["dn"] for g in disc["groups"]}
+        assert groups_by_name["Domain Admins"] == da_dn
+        assert groups_by_name["MSP Operations"] == ops_dn
+        assert groups_by_name["MSP ReadOnly"] == ro_dn
+        assert ldap_srv.unbind_count >= 1
+
+        # 2. Configure Hub with short AD group names + `ldap_viewer_group` and verify `ldap.toml` + live reload
+        reloads_before = live_backends.grafana.ldap_reloads
+        v102_cfg_req = {
+            "host": "monitoring.msp.example.com",
+            "lets_encrypt": True,
+            "http2https": True,
+            "storage_mode": "local",
+            "ldap_enabled": True,
+            "ldap_domain": "ad.bls-isp.net",
+            "ldap_admin_group": "Domain Admins",
+            "ldap_editor_group": "MSP Operations",
+            "ldap_viewer_group": "MSP ReadOnly",
+            "grafana_admin_password": "MspV102AdminPassword!",
+        }
+        await hub.run_script("actions/configure-module/01hostname-validation", v102_cfg_req)
+        await hub.run_script("actions/configure-module/20configure", v102_cfg_req)
+        await hub.run_script("actions/configure-module/80start_services", v102_cfg_req)
+
+        assert live_backends.grafana.ldap_reloads > reloads_before
+        _, _, _, read_cfg = await hub.run_script("actions/get-configuration/20read", {})
+        assert read_cfg["ldap_enabled"] is True
+        assert read_cfg["ldap_domain"] == "ad.bls-isp.net"
+        assert read_cfg["ldap_admin_group"] == "Domain Admins"
+        assert read_cfg["ldap_editor_group"] == "MSP Operations"
+        assert read_cfg["ldap_viewer_group"] == "MSP ReadOnly"
+
+        ldap_toml = (hub.config_dir / "grafana" / "ldap.toml").read_text(encoding="utf-8")
+        assert f'group_dn = "{da_dn}"' in ldap_toml
+        assert f'group_dn = "{ops_dn}"' in ldap_toml
+        assert f'group_dn = "{ro_dn}"' in ldap_toml
+        assert 'org_role = "Viewer"' in ldap_toml
+        assert "grafana_admin = true" in ldap_toml
+        assert 'group_search_filter = "(&(objectClass=group)(member:1.2.840.113556.1.4.1941:=%s))"' in ldap_toml
+        assert 'group_search_filter_user_attribute = "distinguishedName"' in ldap_toml
+        assert 'group_dn = "*"' not in ldap_toml
+
+        grafana_ini = (hub.config_dir / "grafana" / "grafana.ini").read_text(encoding="utf-8")
+        assert "[alerting]\nenabled = false" in grafana_ini
+        assert "[unified_alerting]\nenabled = false" in grafana_ini
+        assert "skip_org_role_sync = false" in grafana_ini
+
+        # 3. Live `test-ldap-user` action: direct Admin (`Genera`), nested Editor (`n.engineer`),
+        #    Viewer (`v.auditor`), and RFC 4515 filter-injection defense
+        _, _, _, test_genera = await hub.run_script(
+            "actions/test-ldap-user/20test",
+            {
+                "domain": "ad.bls-isp.net",
+                "username": "Genera",
+                "ldap_admin_group": "Domain Admins",
+                "ldap_editor_group": "MSP Operations",
+                "ldap_viewer_group": "MSP ReadOnly",
+            },
+        )
+        assert test_genera["ok"] is True
+        assert test_genera["found"] is True
+        assert test_genera["user_dn"] == genera_dn
+        assert test_genera["matched_role"] == "Admin"
+        assert test_genera["grafana_admin"] is True
+        assert da_dn in test_genera["member_of"]
+        assert du_dn in test_genera["member_of"]
+
+        _, _, _, test_nested = await hub.run_script(
+            "actions/test-ldap-user/20test",
+            {
+                "domain": "ad.bls-isp.net",
+                "username": "n.engineer",
+                "ldap_admin_group": "Domain Admins",
+                "ldap_editor_group": "MSP-Operations",
+                "ldap_viewer_group": "MSP ReadOnly",
+            },
+        )
+        assert test_nested["ok"] is True
+        assert test_nested["found"] is True
+        assert test_nested["user_dn"] == nested_dn
+        assert test_nested["matched_role"] == "Editor"
+        assert test_nested["grafana_admin"] is False
+        assert ops_dn in test_nested["member_of"]
+
+        _, _, _, test_viewer = await hub.run_script(
+            "actions/test-ldap-user/20test",
+            {
+                "domain": "ad.bls-isp.net",
+                "username": "v.auditor",
+                "ldap_admin_group": "Domain Admins",
+                "ldap_editor_group": "MSP Operations",
+                "ldap_viewer_group": "MSP ReadOnly",
+            },
+        )
+        assert test_viewer["ok"] is True
+        assert test_viewer["found"] is True
+        assert test_viewer["matched_role"] == "Viewer"
+        assert test_viewer["grafana_admin"] is False
+
+        _, _, _, test_inj = await hub.run_script(
+            "actions/test-ldap-user/20test",
+            {
+                "domain": "ad.bls-isp.net",
+                "username": "Genera)(|(objectClass=*",
+                "ldap_admin_group": "Domain Admins",
+            },
+        )
+        assert test_inj["ok"] is True
+        assert test_inj["found"] is False
+        assert test_inj["matched_role"] == "None"
+        assert test_inj["grafana_admin"] is False
+
+        # 4. Multi-User Customer Grafana Account Management (`Viewer` + `Editor`, suspend/re-enable,
+        #    password reset, cross-tenant collision rejection, delete, and Restic backup/restore)
+        _, _, _, saved_acme = await hub.run_script(
+            "actions/save-tenant/20save",
+            {
+                "customer": "acme-gmbh",
+                "display_name": "Acme GmbH",
+                "sites": ["hq", "branch"],
+                "contact_emails": ["it@acme.de"],
+                "customer_portal_enabled": True,
+            },
+        )
+        acme_oid = int(saved_acme["grafana_org_id"])
+        assert acme_oid > 1
+        assert saved_acme["grafana_login_url"] == "https://monitoring.msp.example.com/login"
+        assert saved_acme["portal_users_count"] == 0
+
+        _, _, _, saved_rival = await hub.run_script(
+            "actions/save-tenant/20save",
+            {
+                "customer": "rival-gmbh",
+                "display_name": "Rival GmbH",
+                "sites": ["hq"],
+                "customer_portal_enabled": True,
+            },
+        )
+        rival_oid = int(saved_rival["grafana_org_id"])
+        assert rival_oid > 1 and rival_oid != acme_oid
+
+        _, u_view_raw, _, u_view_out = await hub.run_script(
+            "actions/save-portal-user/20save",
+            {
+                "customer": "acme-gmbh",
+                "username": "acme.viewer",
+                "full_name": "Acme NOC Viewer",
+                "email": "noc@acme.de",
+                "role": "Viewer",
+                "disabled": False,
+                "password": "AcmeViewerPassword!2026",
+            },
+        )
+        assert u_view_out["grafana_synced"] is True
+        assert u_view_out["user"]["role"] == "Viewer"
+        assert "AcmeViewerPassword!2026" not in u_view_raw
+
+        _, u_edit_raw, _, u_edit_out = await hub.run_script(
+            "actions/save-portal-user/20save",
+            {
+                "customer": "acme-gmbh",
+                "username": "acme.editor",
+                "full_name": "Acme Lead Engineer",
+                "email": "lead@acme.de",
+                "role": "Editor",
+                "disabled": False,
+                "password": "AcmeEditorPassword!2026",
+            },
+        )
+        assert u_edit_out["grafana_synced"] is True
+        assert u_edit_out["user"]["role"] == "Editor"
+        assert "AcmeEditorPassword!2026" not in u_edit_raw
+
+        viewer_uid = next(
+            u["id"] for u in live_backends.grafana.users.values() if u["login"] == "acme.viewer"
+        )
+        editor_uid = next(
+            u["id"] for u in live_backends.grafana.users.values() if u["login"] == "acme.editor"
+        )
+        assert live_backends.grafana.org_members[acme_oid] == {
+            viewer_uid: "Viewer",
+            editor_uid: "Editor",
+        }
+        assert viewer_uid not in live_backends.grafana.org_members[1]
+        assert editor_uid not in live_backends.grafana.org_members[1]
+        assert viewer_uid not in live_backends.grafana.org_members[rival_oid]
+        assert editor_uid not in live_backends.grafana.org_members[rival_oid]
+        assert live_backends.grafana.users[viewer_uid]["isGrafanaAdmin"] is False
+        assert live_backends.grafana.users[editor_uid]["isGrafanaAdmin"] is False
+
+        _, lp_raw, _, lp_out = await hub.run_script(
+            "actions/list-portal-users/20read",
+            {"customer": "acme-gmbh"},
+        )
+        assert len(lp_out["users"]) == 2
+        assert lp_out["grafana_login_url"] == "https://monitoring.msp.example.com/login"
+        assert lp_out["grafana_org_name"] == "Customer: Acme GmbH (acme-gmbh)"
+        assert "AcmeViewerPassword!2026" not in lp_raw
+        assert "AcmeEditorPassword!2026" not in lp_raw
+
+        _, _, _, lt_out = await hub.run_script("actions/list-tenants/20read", {})
+        acme_row = next(t for t in lt_out["tenants"] if t["customer"] == "acme-gmbh")
+        assert acme_row["portal_users_count"] == 2
+        assert acme_row["grafana_login_url"] == "https://monitoring.msp.example.com/login"
+
+        # Suspend (`disabled: true`) and re-enable (`disabled: false`) with `password_unchanged: true`
+        await hub.run_script(
+            "actions/save-portal-user/20save",
+            {
+                "customer": "acme-gmbh",
+                "username": "acme.editor",
+                "full_name": "Acme Lead Engineer",
+                "email": "lead@acme.de",
+                "role": "Editor",
+                "disabled": True,
+                "password": "",
+                "password_unchanged": True,
+            },
+        )
+        assert live_backends.grafana.users[editor_uid]["isDisabled"] is True
+        assert editor_uid not in live_backends.grafana.org_members[acme_oid]
+        assert (
+            load_portal_viewer_secret(hub.state_dir, "acme-gmbh", "acme.editor")
+            == "AcmeEditorPassword!2026"
+        )
+
+        await hub.run_script(
+            "actions/save-portal-user/20save",
+            {
+                "customer": "acme-gmbh",
+                "username": "acme.editor",
+                "full_name": "Acme Lead Engineer",
+                "email": "lead@acme.de",
+                "role": "Editor",
+                "disabled": False,
+                "password": "",
+                "password_unchanged": True,
+            },
+        )
+        assert live_backends.grafana.users[editor_uid]["isDisabled"] is False
+        assert live_backends.grafana.org_members[acme_oid][editor_uid] == "Editor"
+
+        # Password reset on `acme.editor`
+        await hub.run_script(
+            "actions/save-portal-user/20save",
+            {
+                "customer": "acme-gmbh",
+                "username": "acme.editor",
+                "full_name": "Acme Lead Engineer",
+                "email": "lead@acme.de",
+                "role": "Editor",
+                "disabled": False,
+                "password": "AcmeEditorRotated!2026",
+                "password_unchanged": False,
+            },
+        )
+        assert (
+            load_portal_viewer_secret(hub.state_dir, "acme-gmbh", "acme.editor")
+            == "AcmeEditorRotated!2026"
+        )
+        assert live_backends.grafana.users[editor_uid]["password"] == "AcmeEditorRotated!2026"
+
+        # Cross-tenant case-insensitive duplicate username MUST be rejected with exit code 2
+        _, dup_stdout, _, dup_err = await hub.run_script(
+            "actions/save-portal-user/20save",
+            {
+                "customer": "rival-gmbh",
+                "username": "ACME.EDITOR",
+                "role": "Viewer",
+                "password": "RivalAttemptPassword!1",
+            },
+            expect_rc=2,
+        )
+        assert hub.read_meta()["status"] == "validation-failed"
+        assert "already in use" in dup_stdout
+        assert dup_err[0]["field"] == "username"
+
+        # Create & delete temporary user `acme.temp` via `delete-portal-user`
+        await hub.run_script(
+            "actions/save-portal-user/20save",
+            {
+                "customer": "acme-gmbh",
+                "username": "acme.temp",
+                "role": "Viewer",
+                "password": "TempPortalUserPass!2026",
+            },
+        )
+        temp_uid = next(
+            u["id"] for u in live_backends.grafana.users.values() if u["login"] == "acme.temp"
+        )
+        _, _, _, del_out = await hub.run_script(
+            "actions/delete-portal-user/20delete",
+            {"customer": "acme-gmbh", "username": "acme.temp"},
+        )
+        assert del_out["status"] == "deleted"
+        assert del_out["grafana_synced"] is True
+        assert del_out["deleted"] is True
+        assert temp_uid in live_backends.grafana.deleted_user_ids
+        assert temp_uid not in live_backends.grafana.users
+        assert load_portal_viewer_secret(hub.state_dir, "acme-gmbh", "acme.temp") is None
+
+        # 5. Restic Backup & Restore (`module-dump-state` + `restore-module`) preserves ALL multi-user
+        #    portal accounts, individual sealed passwords, and `ldap_viewer_group` rendering!
+        await hub.run_script("bin/module-dump-state", validate_io=False)
+        restored_hub = NS8ModuleInstance(
+            kind="hub",
+            install_dir=tmp_path / "hub_v102_restored",
+            module_id="central-monitoring-hub2",
+            tcp_port=20081,
+            backends=live_backends,
+        )
+        restored_hub.set_ldap_domain("ad.bls-isp.net", ad_domain_cfg)
+        hub.copy_restic_snapshot_to(restored_hub.install_dir)
+
+        orig_env = json.loads(hub.meta_file.read_text(encoding="utf-8"))["persisted_env"]
+        await restored_hub.run_script(
+            "actions/restore-module/06copyenv", {"environment": orig_env}, validate_io=False
+        )
+        await restored_hub.run_script("actions/restore-module/50configure", {}, validate_io=False)
+
+        assert (
+            load_portal_viewer_secret(restored_hub.state_dir, "acme-gmbh", "acme.viewer")
+            == "AcmeViewerPassword!2026"
+        )
+        assert (
+            load_portal_viewer_secret(restored_hub.state_dir, "acme-gmbh", "acme.editor")
+            == "AcmeEditorRotated!2026"
+        )
+        _, _, _, restored_lp = await restored_hub.run_script(
+            "actions/list-portal-users/20read",
+            {"customer": "acme-gmbh"},
+        )
+        restored_roles = {u["username"]: u["role"] for u in restored_lp["users"]}
+        assert restored_roles == {"acme.viewer": "Viewer", "acme.editor": "Editor"}
+
+        restored_ldap_toml = (restored_hub.config_dir / "grafana" / "ldap.toml").read_text(
+            encoding="utf-8"
+        )
+        assert f'group_dn = "{da_dn}"' in restored_ldap_toml
+        assert f'group_dn = "{ops_dn}"' in restored_ldap_toml
+        assert f'group_dn = "{ro_dn}"' in restored_ldap_toml
+        assert 'org_role = "Viewer"' in restored_ldap_toml
+
+        # 6. `V102-SEC-01` Live `hub_gateway` SSRF & Datasource-Mutation Block (`403` on
+        #    `/api/alertmanager/...`, `/api/ruler/...`, `/api/v1/provisioning/...`, and mutating `/api/datasources`)
+        v102_gw = await live_backends.start_hub_gateway(hub.state_dir, tmp_path / "v102_gw_tls")
+        v102_ssl = ssl.create_default_context(cafile=str(v102_gw.ca_cert_path))
+        async with aiohttp.ClientSession() as session:
+            for method, blocked_path in (
+                ("POST", "/api/alertmanager/grafana/config/api/v1/receivers/test"),
+                ("GET", "/api/alertmanager/grafana/api/v2/status"),
+                ("GET", "/api/ruler/grafana/api/v1/rules"),
+                ("POST", "/api/v1/provisioning/contact-points"),
+                ("POST", "/api/datasources"),
+                ("PUT", "/api/datasources/1"),
+                ("DELETE", "/api/datasources/uid/prometheus"),
+            ):
+                async with session.request(
+                    method,
+                    f"{v102_gw.https_url}{blocked_path}",
+                    json={"probe": True} if method in ("POST", "PUT") else None,
+                    ssl=v102_ssl,
+                ) as blocked_resp:
+                    assert blocked_resp.status == 403, (
+                        f"Expected 403 for {method} {blocked_path}, got {blocked_resp.status}"
+                    )
+
+            async with session.get(
+                f"{v102_gw.https_url}/api/datasources/proxy/uid/prometheus/api/v1/query?query=up",
+                ssl=v102_ssl,
+            ) as allowed_ds_resp:
+                assert allowed_ds_resp.status == 200
+
+        # 7. `V102-ARCH-01` Live NS8 `update-module.d/20pull_images` + `50update` (`1.0.1` -> `1.0.2`)
+        (restored_hub.etc_dir / "defaults.env").write_bytes(
+            b"CENTRAL_MONITORING_HUB_GATEWAY_IMAGE=ghcr.io/bls-isp/central-monitoring-hub-gateway:1.0.2\n"
+        )
+        stale_meta = restored_hub.read_meta()
+        stale_meta["persisted_env"]["CENTRAL_MONITORING_HUB_GATEWAY_IMAGE"] = (
+            "ghcr.io/bls-isp/central-monitoring-hub-gateway:1.0.1"
+        )
+        stale_meta["persisted_env"].pop("LDAP_VIEWER_GROUP", None)
+        restored_hub.meta_file.write_bytes((json.dumps(stale_meta, indent=2) + "\n").encode("utf-8"))
+        stale_env_lines = [
+            f"{k}={v}"
+            for k, v in sorted(stale_meta["persisted_env"].items())
+        ]
+        restored_hub.env_file.write_bytes(("\n".join(stale_env_lines) + "\n").encode("utf-8"))
+        (restored_hub.config_dir / "grafana" / "grafana.ini").write_bytes(b"[server]\nhttp_port = 3000\n")
+
+        await restored_hub.run_script("update-module.d/20pull_images", validate_io=False)
+        await restored_hub.run_script("update-module.d/50update", validate_io=False)
+
+        upgraded_meta = restored_hub.read_meta()
+        assert upgraded_meta["persisted_env"]["CENTRAL_MONITORING_HUB_GATEWAY_IMAGE"].endswith(
+            ":1.0.2"
+        )
+        assert "LDAP_VIEWER_GROUP" in upgraded_meta["persisted_env"]
+        upgraded_ini = (restored_hub.config_dir / "grafana" / "grafana.ini").read_text(
+            encoding="utf-8"
+        )
+        assert "[unified_alerting]\nenabled = false" in upgraded_ini
+        assert upgraded_meta["systemctl_state"]["hub-gateway.service"] == "active"
+        assert upgraded_meta["systemctl_state"]["grafana.service"] == "active"
+    finally:
+        ldap_srv.stop()
+
 
 
 

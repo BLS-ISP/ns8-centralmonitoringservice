@@ -61,6 +61,9 @@ def test_ns8_rule_2_every_set_env_caller_invokes_dump_env() -> None:
         action_dir = IMAGEROOT / "actions" / action_name
         if action_dir.exists():
             owned_python_files.extend(p for p in action_dir.iterdir() if p.is_file() and not p.name.endswith(".json"))
+    update_dir = IMAGEROOT / "update-module.d"
+    if update_dir.exists():
+        owned_python_files.extend(p for p in update_dir.iterdir() if p.is_file())
 
     assert owned_python_files
     for path in owned_python_files:
@@ -132,6 +135,7 @@ def test_ns8_rules_5_7_8_containerfile_and_backup_files() -> None:
     assert (IMAGEROOT / "bin" / "discover-smarthost").exists()
     assert (IMAGEROOT / "bin" / "render-hub-configs").exists()
     assert (IMAGEROOT / "update-module.d" / "20pull_images").exists()
+    assert (IMAGEROOT / "update-module.d" / "50update").exists()
 
 
 def test_action_schemas_match_shared_schemas_exactly() -> None:

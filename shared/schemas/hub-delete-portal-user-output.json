@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-delete-portal-user-output.json",
+  "title": "central-monitoring-hub delete-portal-user output",
+  "type": "object",
+  "required": ["status", "customer", "username", "grafana_synced"],
+  "additionalProperties": false,
+  "properties": {
+    "status": { "type": "string", "enum": ["deleted"] },
+    "customer": { "type": "string" },
+    "username": { "type": "string" },
+    "grafana_synced": { "type": "boolean" },
+    "deleted": { "type": "boolean" }
+  }
+}

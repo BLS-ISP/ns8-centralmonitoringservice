@@ -140,3 +140,39 @@ def pod_fetch_json(
         return parsed if isinstance(parsed, dict) else None
     except (UnicodeDecodeError, json.JSONDecodeError):
         return None
+
+
+def reload_grafana_ldap_if_running(
+    state_dir: object = None,
+    env: dict[str, str] | None = None,
+) -> bool:
+    """Trigger best-effort live Grafana LDAP config reload without restarting the pod."""
+    from hub_core import resolve_state_dir
+    from hub_core.env_store import read_module_env, read_secrets
+
+    sdir = resolve_state_dir(state_dir)  # type: ignore[arg-type]
+    eff_env = env if env is not None else read_module_env(sdir)
+    configured = eff_env.get("CONFIGURED", "false").lower() == "true"
+    ldap_enabled = eff_env.get("LDAP_ENABLED", "false").lower() == "true"
+    if not configured and not ldap_enabled:
+        return False
+
+    secrets_map = read_secrets(sdir)
+    admin_pw = (
+        secrets_map.get("GF_SECURITY_ADMIN_PASSWORD")
+        or secrets_map.get("GRAFANA_ADMIN_PASSWORD")
+        or ""
+    )
+    if not admin_pw:
+        return False
+
+    basic_raw = f"admin:{admin_pw}".encode("utf-8")
+    auth_header = "Basic " + base64.b64encode(basic_raw).decode("ascii")
+    res = pod_http_request(
+        "http://127.0.0.1:3000/api/admin/provisioning/ldap/reload",
+        method="POST",
+        data=b"",
+        headers={"Authorization": auth_header},
+        timeout=1.5,
+    )
+    return bool(res is not None and 200 <= res[0] < 300)

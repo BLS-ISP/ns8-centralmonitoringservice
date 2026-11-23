@@ -1,4 +1,4 @@
-"""Idempotent Grafana Multi-Org, Datasource, Dashboard & Portal Viewer Provisioner.
+"""Idempotent Grafana Multi-Org, Datasource, Dashboard & Multi-User Portal Provisioner.
 
 Provisions:
 1. MSP Main Org (Org 1):
@@ -9,9 +9,9 @@ Provisions:
    - Dedicated Org `Customer: <display_name> (<customer>)`
    - `Prometheus` pointing strictly to `prom-label-proxy` (`http://127.0.0.1:9095`, `X-Scope-OrgID: <customer>`)
    - `Loki` pointing to `http://127.0.0.1:3100` (`X-Scope-OrgID: <customer>`)
-   - `<portal_viewer_username>` granted strictly `Viewer` in Customer Org, stripped from all
-     other Orgs (including Org 1), protected against superadmin/external account collisions,
-     and provisioned with temporary password before Org isolation completes.
+   - Multi-user portal accounts (`Viewer` or `Editor` strictly inside Customer Org `oid > 1`),
+     stripped from Org 1 and all other Orgs, protected against superadmin/external collisions,
+     enabled/disabled cleanly, and provisioned with bootstrap secret before Org isolation completes.
 """
 
 from __future__ import annotations
@@ -31,10 +31,13 @@ from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 from hub_tenancy.store import (
+    ALLOWED_PORTAL_ROLES,
     RESERVED_PORTAL_USERNAMES,
+    build_grafana_org_name,
     clear_previous_portal_viewer_username,
     load_portal_viewer_secret,
     load_tenants_raw,
+    normalize_portal_users,
     update_tenant_grafana_org_id,
 )
 
@@ -371,7 +374,7 @@ def _ensure_customer_org(
     client: GrafanaApiClient, state_dir: Path, tenant: dict[str, Any]
 ) -> int:
     customer = tenant["customer"]
-    desired_name = f"Customer: {tenant['display_name']} ({customer})"
+    desired_name = build_grafana_org_name(tenant["display_name"], customer)
     stored_org_id = tenant.get("grafana_org_id")
 
     if isinstance(stored_org_id, int) and stored_org_id > 1:
@@ -435,34 +438,61 @@ def _remove_user_from_other_orgs(
             client.request("DELETE", f"/api/orgs/1/users/{uid}", allow_404=True)
 
 
-def _evict_previous_viewer_if_renamed(
-    client: GrafanaApiClient, state_dir: Path, tenant: dict[str, Any]
-) -> None:
-    prev_username = str(tenant.get("previous_portal_viewer_username") or "").strip()
-    curr_username = str(tenant.get("portal_viewer_username") or "").strip()
-    if not prev_username:
+def _delete_or_disable_grafana_user(client: GrafanaApiClient, username: str) -> None:
+    uname = username.strip()
+    if not uname:
         return
-    if prev_username.lower() != curr_username.lower():
-        st, prev_obj = client.request(
-            "GET", f"/api/users/lookup?loginOrEmail={quote(prev_username)}", allow_404=True
-        )
-        if st == 200 and isinstance(prev_obj, dict) and "id" in prev_obj:
-            if not _is_privileged_or_external_user(prev_obj, client.admin_user):
-                prev_uid = int(prev_obj["id"])
-                _remove_user_from_other_orgs(client, prev_uid, keep_org_id=None)
-                client.request("POST", f"/api/admin/users/{prev_uid}/disable", {}, allow_404=True)
-    clear_previous_portal_viewer_username(state_dir, tenant["customer"])
+    st, user_obj = client.request(
+        "GET", f"/api/users/lookup?loginOrEmail={quote(uname)}", allow_404=True
+    )
+    if st != 200 or not isinstance(user_obj, dict) or "id" not in user_obj:
+        return
+    if _is_privileged_or_external_user(user_obj, client.admin_user):
+        return
+    uid = int(user_obj["id"])
+    _remove_user_from_other_orgs(client, uid, keep_org_id=None)
+    client.request("POST", f"/api/admin/users/{uid}/disable", {}, allow_404=True)
+    try:
+        client.request("DELETE", f"/api/admin/users/{uid}", allow_404=True)
+    except RuntimeError:
+        pass
 
 
-def _sync_portal_viewer_user(
+def _evict_removed_portal_users(
     client: GrafanaApiClient,
     state_dir: Path,
     tenant: dict[str, Any],
+    active_usernames_lower: set[str],
+) -> None:
+    pending: list[str] = []
+    prev_u = str(tenant.get("previous_portal_viewer_username") or "").strip()
+    if prev_u:
+        pending.append(prev_u)
+    for item in tenant.get("evicted_portal_usernames") or []:
+        s = str(item or "").strip()
+        if s:
+            pending.append(s)
+    if not pending:
+        return
+
+    seen: set[str] = set()
+    for uname in pending:
+        ulow = uname.lower()
+        if ulow in seen or ulow in active_usernames_lower:
+            continue
+        seen.add(ulow)
+        _delete_or_disable_grafana_user(client, uname)
+    clear_previous_portal_viewer_username(state_dir, tenant["customer"])
+
+
+def _sync_single_portal_user(
+    client: GrafanaApiClient,
+    state_dir: Path,
+    tenant: dict[str, Any],
+    user_spec: dict[str, Any],
     org_id: int | None,
 ) -> None:
-    _evict_previous_viewer_if_renamed(client, state_dir, tenant)
-
-    username = str(tenant.get("portal_viewer_username") or "").strip()
+    username = str(user_spec.get("username") or "").strip()
     if not username:
         return
 
@@ -470,18 +500,21 @@ def _sync_portal_viewer_user(
         raise RuntimeError(f"Refusing to provision reserved Grafana username: {username!r}")
 
     customer = tenant["customer"]
-    enabled = bool(tenant.get("customer_portal_enabled", False))
+    portal_enabled = bool(tenant.get("customer_portal_enabled", False))
+    user_disabled = bool(user_spec.get("disabled", False))
+    raw_role = str(user_spec.get("role") or "Viewer").strip()
+    desired_role = raw_role if raw_role in ALLOWED_PORTAL_ROLES else "Viewer"
+
     st, user_obj = client.request(
         "GET", f"/api/users/lookup?loginOrEmail={quote(username)}", allow_404=True
     )
-
     if st == 200 and isinstance(user_obj, dict):
         if _is_privileged_or_external_user(user_obj, client.admin_user):
             raise RuntimeError(
                 f"Refusing to mutate privileged or external Grafana account {username!r}"
             )
 
-    if not enabled:
+    if not portal_enabled or user_disabled:
         if st == 200 and isinstance(user_obj, dict) and "id" in user_obj:
             uid = int(user_obj["id"])
             _remove_user_from_other_orgs(client, uid, keep_org_id=None)
@@ -491,7 +524,15 @@ def _sync_portal_viewer_user(
     if org_id is None or org_id <= 1:
         return
 
-    sealed_password = load_portal_viewer_secret(state_dir, customer)
+    full_name = (
+        str(user_spec.get("full_name") or "").strip()
+        or f"{tenant['display_name']} Portal {desired_role}"
+    )
+    email = (
+        str(user_spec.get("email") or "").strip()
+        or f"{username}@{customer}.portal.local"
+    )
+    sealed_password = load_portal_viewer_secret(state_dir, customer, username)
     created_new = False
 
     if st == 404 or not isinstance(user_obj, dict) or "id" not in user_obj:
@@ -502,9 +543,9 @@ def _sync_portal_viewer_user(
             "POST",
             "/api/admin/users",
             {
-                "name": f"{tenant['display_name']} Portal Viewer",
+                "name": full_name,
                 "login": username,
-                "email": f"{username}@{customer}.portal.local",
+                "email": email,
                 "password": bootstrap_pw,
                 "OrgId": org_id,
             },
@@ -513,6 +554,20 @@ def _sync_portal_viewer_user(
         created_new = True
     else:
         uid = int(user_obj["id"])
+        if user_obj.get("name") != full_name or user_obj.get("email") != email:
+            try:
+                client.request(
+                    "PUT",
+                    f"/api/users/{uid}",
+                    {
+                        "login": username,
+                        "name": full_name,
+                        "email": email,
+                    },
+                    allow_404=True,
+                )
+            except RuntimeError:
+                pass
 
     _, org_users = client.request("GET", f"/api/orgs/{org_id}/users", org_id=org_id)
     member = None
@@ -523,14 +578,14 @@ def _sync_portal_viewer_user(
         client.request(
             "POST",
             f"/api/orgs/{org_id}/users",
-            {"loginOrEmail": username, "role": "Viewer"},
+            {"loginOrEmail": username, "role": desired_role},
             org_id=org_id,
         )
-    elif member.get("role") != "Viewer":
+    elif member.get("role") != desired_role:
         client.request(
             "PATCH",
             f"/api/orgs/{org_id}/users/{uid}",
-            {"role": "Viewer"},
+            {"role": desired_role},
             org_id=org_id,
         )
 
@@ -554,6 +609,34 @@ def _sync_portal_viewer_user(
         )
 
 
+def _collect_globally_active_portal_usernames(tenants: list[dict[str, Any]]) -> set[str]:
+    return {
+        str(u["username"]).strip().lower()
+        for t in tenants
+        for u in normalize_portal_users(t)
+        if u.get("username")
+    }
+
+
+def _sync_portal_users(
+    client: GrafanaApiClient,
+    state_dir: Path,
+    tenant: dict[str, Any],
+    org_id: int | None,
+    *,
+    globally_active_lower: set[str] | None = None,
+) -> None:
+    users = normalize_portal_users(tenant)
+    active_set = (
+        globally_active_lower
+        if globally_active_lower is not None
+        else _collect_globally_active_portal_usernames(load_tenants_raw(state_dir))
+    )
+    _evict_removed_portal_users(client, state_dir, tenant, active_set)
+    for user_spec in users:
+        _sync_single_portal_user(client, state_dir, tenant, user_spec, org_id)
+
+
 def sync_all_orgs(
     state_dir: str | Path,
     env: Mapping[str, str] | None = None,
@@ -575,8 +658,14 @@ def sync_all_orgs(
     dashboards_dir = _resolve_dashboards_dir(sdir, env_map)
     dashboards = _load_dashboard_models(dashboards_dir)
     tenants = load_tenants_raw(sdir)
+    globally_active_lower = _collect_globally_active_portal_usernames(tenants)
 
     _sync_org1(client, tenants, promql_upstream, loki_upstream, dashboards)
+
+    # Evict deferred/renamed portal users across all tenants FIRST before provisioning active users
+    # so a username freed on Tenant Z and newly claimed by Tenant A is never clobbered.
+    for tenant in tenants:
+        _evict_removed_portal_users(client, sdir, tenant, globally_active_lower)
 
     synced_customer_orgs = 0
     for tenant in tenants:
@@ -625,15 +714,22 @@ def sync_all_orgs(
                     {"dashboard": locked_model, "overwrite": True},
                     org_id=oid,
                 )
-            _sync_portal_viewer_user(client, sdir, tenant, oid)
+            _sync_portal_users(
+                client,
+                sdir,
+                tenant,
+                oid,
+                globally_active_lower=globally_active_lower,
+            )
             synced_customer_orgs += 1
         else:
             existing_oid = tenant.get("grafana_org_id")
-            _sync_portal_viewer_user(
+            _sync_portal_users(
                 client,
                 sdir,
                 tenant,
                 int(existing_oid) if isinstance(existing_oid, int) else None,
+                globally_active_lower=globally_active_lower,
             )
 
     return {"synced": True, "customer_orgs": synced_customer_orgs}
@@ -648,11 +744,13 @@ def sync_all_orgs_if_running(
     """Best-effort Grafana sync with bounded readiness retry when Grafana container is starting."""
     sdir = Path(state_dir)
     env_map = _merged_env(sdir, env)
+    has_explicit_url = bool((env or {}).get("GRAFANA_URL") or os.environ.get("GRAFANA_URL"))
+    probe_timeout = 0.5 if (has_explicit_url or os.name != "nt") else 0.15
     client = GrafanaApiClient(
         env_map.get("GRAFANA_URL", "http://127.0.0.1:3000"),
         env_map.get("GRAFANA_ADMIN_USER", "admin"),
         env_map.get("GRAFANA_ADMIN_PASSWORD", "admin"),
-        timeout=0.5,
+        timeout=probe_timeout,
     )
 
     if max_wait_seconds is not None:
@@ -678,29 +776,62 @@ def sync_all_orgs_if_running(
         return {"synced": False, "reason": str(exc)}
 
 
+def delete_grafana_portal_user_if_running(
+    state_dir: str | Path,
+    env: Mapping[str, str] | None,
+    username: str,
+    *,
+    customer: str = "",
+) -> bool:
+    """Evict and delete a portal user from Grafana (`DELETE /api/admin/users/<id>`) when running."""
+    sdir = Path(state_dir)
+    env_map = _merged_env(sdir, env)
+    has_explicit_url = bool((env or {}).get("GRAFANA_URL") or os.environ.get("GRAFANA_URL"))
+    probe_timeout = 1.0 if (has_explicit_url or os.name != "nt") else 0.15
+    client = GrafanaApiClient(
+        env_map.get("GRAFANA_URL", "http://127.0.0.1:3000"),
+        env_map.get("GRAFANA_ADMIN_USER", "admin"),
+        env_map.get("GRAFANA_ADMIN_PASSWORD", "admin"),
+        timeout=probe_timeout,
+    )
+    if not client.is_healthy():
+        return False
+    try:
+        globally_active = _collect_globally_active_portal_usernames(load_tenants_raw(sdir))
+        if username.strip().lower() not in globally_active:
+            _delete_or_disable_grafana_user(client, username)
+        if customer:
+            clear_previous_portal_viewer_username(sdir, customer)
+        return True
+    except Exception:
+        return False
+
+
 def cleanup_deleted_tenant_if_running(
     state_dir: str | Path,
     env: Mapping[str, str] | None,
     removed_tenant: dict[str, Any],
 ) -> None:
-    """Disable portal viewer user and remove Customer Org when a tenant is deleted."""
+    """Delete all portal users and remove Customer Org when a tenant is deleted."""
     sdir = Path(state_dir)
     env_map = _merged_env(sdir, env)
+    has_explicit_url = bool((env or {}).get("GRAFANA_URL") or os.environ.get("GRAFANA_URL"))
+    probe_timeout = 0.5 if (has_explicit_url or os.name != "nt") else 0.15
     client = GrafanaApiClient(
         env_map.get("GRAFANA_URL", "http://127.0.0.1:3000"),
         env_map.get("GRAFANA_ADMIN_USER", "admin"),
         env_map.get("GRAFANA_ADMIN_PASSWORD", "admin"),
-        timeout=0.5,
+        timeout=probe_timeout,
     )
     if not client.is_healthy():
         return
     try:
-        disabled_copy = dict(removed_tenant)
-        disabled_copy["customer_portal_enabled"] = False
+        globally_active = _collect_globally_active_portal_usernames(load_tenants_raw(sdir))
+        for user_spec in normalize_portal_users(removed_tenant):
+            uname = str(user_spec.get("username") or "").strip()
+            if uname and uname.lower() not in globally_active:
+                _delete_or_disable_grafana_user(client, uname)
         oid = removed_tenant.get("grafana_org_id")
-        _sync_portal_viewer_user(
-            client, sdir, disabled_copy, int(oid) if isinstance(oid, int) else None
-        )
         if isinstance(oid, int) and oid > 1:
             client.request("DELETE", f"/api/orgs/{oid}", allow_404=True)
     except Exception:

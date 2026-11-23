@@ -1,4 +1,4 @@
-"""Atomic file-locked CRUD on `state/tenants.json` (`0600`) and SHA-256 token management."""
+"""Atomic file-locked CRUD on `state/tenants.json` (`0600`), portal users, and SHA-256 tokens."""
 
 from __future__ import annotations
 
@@ -15,13 +15,15 @@ import re
 import secrets
 import tempfile
 import time
-from typing import Any, Final, Iterator
+from typing import Any, Final, Iterator, Mapping
 
 CUSTOMER_RE: Final[re.Pattern[str]] = re.compile(r"\A[a-z0-9][a-z0-9-]{1,46}[a-z0-9]\Z")
 SITE_RE: Final[re.Pattern[str]] = re.compile(r"\A[a-z0-9][a-z0-9-]{0,46}[a-z0-9]\Z")
 COLLECTOR_RE: Final[re.Pattern[str]] = re.compile(r"\A[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]\Z")
 EMAIL_RE: Final[re.Pattern[str]] = re.compile(r"\A[^@\s]+@[^@\s]+\.[^@\s]+\Z")
 VIEWER_USER_RE: Final[re.Pattern[str]] = re.compile(r"\A[a-zA-Z0-9._@-]{3,64}\Z")
+PORTAL_USER_RE: Final[re.Pattern[str]] = re.compile(r"\A[a-zA-Z0-9._-]{3,64}\Z")
+ALLOWED_PORTAL_ROLES: Final[tuple[str, str]] = ("Viewer", "Editor")
 RESERVED_PORTAL_USERNAMES: Final[frozenset[str]] = frozenset(
     {"admin", "root", "grafana", "system", "anonymous"}
 )
@@ -37,6 +39,52 @@ def resolve_state_dir(explicit: str | Path | None = None) -> Path:
         or os.environ.get("STATE_DIR")
     )
     return Path(env_dir) if env_dir else Path(os.getcwd())
+
+
+def build_grafana_org_name(display_name: str, customer: str) -> str:
+    """Return canonical Grafana Organization name for a Customer Portal tenant."""
+    return f"Customer: {display_name} ({customer})"
+
+
+def _read_traefik_host_from_env_file(env_path: Path) -> str:
+    if not env_path.exists():
+        return ""
+    try:
+        raw = env_path.read_text(encoding="utf-8").replace("\r\n", "\n")
+        for line in raw.split("\n"):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            k, v = stripped.split("=", 1)
+            key = k.strip()
+            if key in ("TRAEFIK_HOST", "HUB_HOST"):
+                val = v.strip().strip('"').strip("'")
+                if val:
+                    return val
+    except OSError:
+        pass
+    return ""
+
+
+def resolve_grafana_login_url(
+    state_dir: str | Path,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    """Return `https://<TRAEFIK_HOST>/login` when configured, or empty string."""
+    sdir = Path(state_dir)
+    host = ""
+    if env:
+        host = str(env.get("TRAEFIK_HOST") or env.get("HUB_HOST") or "").strip()
+    if not host:
+        host = _read_traefik_host_from_env_file(sdir / "environment")
+    if not host:
+        host = str(os.environ.get("TRAEFIK_HOST") or os.environ.get("HUB_HOST") or "").strip()
+    if not host:
+        return ""
+    cleaned = re.sub(r"\Ahttps?://", "", host, flags=re.IGNORECASE).rstrip("/")
+    if not cleaned:
+        return ""
+    return f"https://{cleaned}/login"
 
 
 def _utc_now() -> datetime:
@@ -154,41 +202,21 @@ def _keystream_xor(data: bytes, key: bytes, nonce: bytes) -> bytes:
     return bytes(out)
 
 
-def save_portal_viewer_secret(state_dir: str | Path, customer: str, password: str) -> None:
-    """Store sealed portal viewer password outside `tenants.json` so cleartext never hits disk."""
-    sdir = Path(state_dir)
-    secrets_file = sdir / "portal-secrets.json"
-    key = _portal_key(sdir)
+def _seal_secret(password: str, key: bytes) -> dict[str, str]:
     nonce = os.urandom(16)
     ct = _keystream_xor(password.encode("utf-8"), key, nonce)
     mac = hmac.new(key, nonce + ct, hashlib.sha256).hexdigest()
-
-    existing: dict[str, Any] = {}
-    if secrets_file.exists():
-        try:
-            existing = json.loads(secrets_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            existing = {}
-
-    existing[customer] = {
+    return {
         "nonce": base64.b64encode(nonce).decode("ascii"),
         "ct": base64.b64encode(ct).decode("ascii"),
         "mac": mac,
     }
-    _atomic_write_json(secrets_file, existing, mode=0o600)
 
 
-def load_portal_viewer_secret(state_dir: str | Path, customer: str) -> str | None:
-    sdir = Path(state_dir)
-    secrets_file = sdir / "portal-secrets.json"
-    if not secrets_file.exists():
+def _unseal_secret(entry: Any, key: bytes) -> str | None:
+    if not isinstance(entry, dict):
         return None
     try:
-        doc = json.loads(secrets_file.read_text(encoding="utf-8"))
-        entry = doc.get(customer)
-        if not isinstance(entry, dict):
-            return None
-        key = _portal_key(sdir)
         nonce = base64.b64decode(entry["nonce"])
         ct = base64.b64decode(entry["ct"])
         expected_mac = hmac.new(key, nonce + ct, hashlib.sha256).hexdigest()
@@ -199,18 +227,187 @@ def load_portal_viewer_secret(state_dir: str | Path, customer: str) -> str | Non
         return None
 
 
+def _load_portal_secrets_doc(secrets_file: Path) -> dict[str, Any]:
+    if not secrets_file.exists():
+        return {}
+    try:
+        doc = json.loads(secrets_file.read_text(encoding="utf-8"))
+        return doc if isinstance(doc, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _backfill_legacy_user_secret(
+    state_dir: Path,
+    customer: str,
+    rec: dict[str, Any],
+    existing_users: list[dict[str, Any]],
+) -> None:
+    """Backfill `doc[f"{customer}:{u0.lower()}"]` from `doc[customer]` before multi-user updates."""
+    secrets_file = state_dir / "portal-secrets.json"
+    if not secrets_file.exists():
+        return
+    doc = _load_portal_secrets_doc(secrets_file)
+    legacy_entry = doc.get(customer)
+    if not isinstance(legacy_entry, dict):
+        return
+
+    candidates: list[str] = []
+    legacy_primary = str(rec.get("portal_viewer_username") or "").strip()
+    if legacy_primary:
+        candidates.append(legacy_primary)
+    elif len(existing_users) == 1 and existing_users[0].get("username"):
+        candidates.append(str(existing_users[0]["username"]).strip())
+
+    changed = False
+    for u0 in candidates:
+        scoped_key = f"{customer}:{u0.lower()}"
+        if u0 and scoped_key not in doc and f"{customer}:{u0}" not in doc:
+            doc[scoped_key] = dict(legacy_entry)
+            changed = True
+    if changed:
+        _atomic_write_json(secrets_file, doc, mode=0o600)
+
+
+def save_portal_viewer_secret(
+    state_dir: str | Path,
+    customer: str,
+    password: str,
+    username: str | None = None,
+) -> None:
+    """Store sealed portal user password outside `tenants.json` (`0600`)."""
+    sdir = Path(state_dir)
+    secrets_file = sdir / "portal-secrets.json"
+    key = _portal_key(sdir)
+    sealed = _seal_secret(password, key)
+
+    existing = _load_portal_secrets_doc(secrets_file)
+    existing[customer] = sealed
+    if username and username.strip():
+        existing[f"{customer}:{username.strip().lower()}"] = dict(sealed)
+    _atomic_write_json(secrets_file, existing, mode=0o600)
+
+
+def save_portal_user_secret(
+    state_dir: str | Path,
+    customer: str,
+    username: str,
+    password: str,
+    *,
+    is_primary: bool = False,
+) -> None:
+    """Store sealed password keyed by `<customer>:<username>` (and `<customer>` if primary)."""
+    sdir = Path(state_dir)
+    secrets_file = sdir / "portal-secrets.json"
+    key = _portal_key(sdir)
+    sealed = _seal_secret(password, key)
+
+    existing = _load_portal_secrets_doc(secrets_file)
+    existing[f"{customer}:{username.strip().lower()}"] = sealed
+    if is_primary or customer not in existing:
+        existing[customer] = dict(sealed)
+    _atomic_write_json(secrets_file, existing, mode=0o600)
+
+
+def load_portal_viewer_secret(
+    state_dir: str | Path,
+    customer: str,
+    username: str | None = None,
+) -> str | None:
+    """Load sealed password for `<customer>:<username>` (falling back to `<customer>` for legacy)."""
+    sdir = Path(state_dir)
+    secrets_file = sdir / "portal-secrets.json"
+    if not secrets_file.exists():
+        return None
+    doc = _load_portal_secrets_doc(secrets_file)
+    if not doc:
+        return None
+    key = _portal_key(sdir)
+
+    if username is not None and username.strip():
+        uname = username.strip()
+        for cand_key in (f"{customer}:{uname.lower()}", f"{customer}:{uname}"):
+            if cand_key in doc:
+                val = _unseal_secret(doc[cand_key], key)
+                if val is not None:
+                    return val
+        # Backward-compatible fallback for migrated legacy primary portal_viewer_username
+        if customer in doc:
+            for rec in load_tenants_raw(sdir):
+                if rec.get("customer") == customer:
+                    legacy_u = str(rec.get("portal_viewer_username") or "").strip()
+                    users = normalize_portal_users(rec)
+                    if (
+                        (legacy_u and legacy_u.lower() == uname.lower())
+                        or (len(users) == 1 and users[0]["username"].lower() == uname.lower())
+                    ):
+                        return _unseal_secret(doc[customer], key)
+                    break
+        return None
+
+    # No explicit username requested -> return primary user's password or legacy `<customer>` entry
+    for rec in load_tenants_raw(sdir):
+        if rec.get("customer") == customer:
+            primary_u = str(rec.get("portal_viewer_username") or "").strip()
+            if primary_u:
+                scoped_key = f"{customer}:{primary_u.lower()}"
+                if scoped_key in doc:
+                    val = _unseal_secret(doc[scoped_key], key)
+                    if val is not None:
+                        return val
+            break
+
+    if customer in doc:
+        return _unseal_secret(doc[customer], key)
+    return None
+
+
+def delete_portal_user_secret(
+    state_dir: str | Path,
+    customer: str,
+    username: str,
+    *,
+    next_primary_username: str = "",
+) -> None:
+    sdir = Path(state_dir)
+    secrets_file = sdir / "portal-secrets.json"
+    if not secrets_file.exists():
+        return
+    doc = _load_portal_secrets_doc(secrets_file)
+    if not doc:
+        return
+    uname = username.strip()
+    changed = False
+    for k in (f"{customer}:{uname.lower()}", f"{customer}:{uname}"):
+        if k in doc:
+            del doc[k]
+            changed = True
+    if next_primary_username:
+        next_key = f"{customer}:{next_primary_username.strip().lower()}"
+        if next_key in doc:
+            doc[customer] = dict(doc[next_key])
+            changed = True
+    elif customer in doc:
+        del doc[customer]
+        changed = True
+    if changed:
+        _atomic_write_json(secrets_file, doc, mode=0o600)
+
+
 def delete_portal_viewer_secret(state_dir: str | Path, customer: str) -> None:
     sdir = Path(state_dir)
     secrets_file = sdir / "portal-secrets.json"
     if not secrets_file.exists():
         return
-    try:
-        doc = json.loads(secrets_file.read_text(encoding="utf-8"))
-        if isinstance(doc, dict) and customer in doc:
-            del doc[customer]
-            _atomic_write_json(secrets_file, doc, mode=0o600)
-    except Exception:
-        pass
+    doc = _load_portal_secrets_doc(secrets_file)
+    if not doc:
+        return
+    prefix = f"{customer}:"
+    keys_to_delete = [k for k in doc if k == customer or k.startswith(prefix)]
+    if keys_to_delete:
+        for k in keys_to_delete:
+            del doc[k]
+        _atomic_write_json(secrets_file, doc, mode=0o600)
 
 
 def _read_store_unlocked(tenants_path: Path) -> dict[str, Any]:
@@ -227,16 +424,113 @@ def _read_store_unlocked(tenants_path: Path) -> dict[str, Any]:
     return {"version": 1, "tenants": []}
 
 
+def normalize_portal_users(rec: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return normalized multi-user portal accounts, auto-migrating legacy `portal_viewer_username`."""
+    customer = str(rec.get("customer") or "")
+    display_name = str(rec.get("display_name") or customer)
+    default_ts = str(rec.get("created_at") or _iso_utc())
+    default_upd = str(rec.get("updated_at") or default_ts)
+
+    raw_users = rec.get("portal_users")
+    if isinstance(raw_users, list):
+        normalized: list[dict[str, Any]] = []
+        seen_lower: set[str] = set()
+        for item in raw_users:
+            if not isinstance(item, dict):
+                continue
+            uname = str(item.get("username") or "").strip()
+            if not uname or uname.lower() in seen_lower:
+                continue
+            seen_lower.add(uname.lower())
+            role_raw = str(item.get("role") or "Viewer").strip()
+            role = "Editor" if role_raw == "Editor" else "Viewer"
+            normalized.append(
+                {
+                    "username": uname,
+                    "full_name": str(item.get("full_name") or ""),
+                    "email": str(item.get("email") or ""),
+                    "role": role,
+                    "disabled": bool(item.get("disabled", False)),
+                    "created_at": str(item.get("created_at") or default_ts),
+                    "updated_at": str(item.get("updated_at") or default_upd),
+                }
+            )
+        return normalized
+
+    # Seamless auto-migration for legacy single-user `portal_viewer_username` records
+    legacy_u = str(rec.get("portal_viewer_username") or "").strip()
+    if legacy_u:
+        return [
+            {
+                "username": legacy_u,
+                "full_name": f"{display_name} Portal Viewer",
+                "email": f"{legacy_u}@{customer}.portal.local",
+                "role": "Viewer",
+                "disabled": False,
+                "created_at": default_ts,
+                "updated_at": default_upd,
+            }
+        ]
+    return []
+
+
+def _derive_primary_portal_username(users: list[dict[str, Any]]) -> str:
+    for u in users:
+        if not bool(u.get("disabled", False)) and u.get("username"):
+            return str(u["username"])
+    if users and users[0].get("username"):
+        return str(users[0]["username"])
+    return ""
+
+
+def _reserved_usernames_set() -> set[str]:
+    names = set(RESERVED_PORTAL_USERNAMES)
+    env_admin = os.environ.get("GRAFANA_ADMIN_USER", "admin").strip().lower()
+    if env_admin:
+        names.add(env_admin)
+    return names
+
+
+def _assert_username_globally_available(
+    tenants: list[dict[str, Any]],
+    customer: str,
+    username: str,
+) -> None:
+    uname_low = username.strip().lower()
+    if uname_low in _reserved_usernames_set():
+        raise ValueError(f"Reserved Grafana username is not allowed: {username!r}")
+
+    for other in tenants:
+        if other.get("customer") == customer:
+            continue
+        other_legacy = str(other.get("portal_viewer_username") or "").strip().lower()
+        if other_legacy and other_legacy == uname_low:
+            raise ValueError(
+                f"Portal username {username!r} is already in use by another tenant"
+            )
+        for other_u in normalize_portal_users(other):
+            if str(other_u.get("username") or "").strip().lower() == uname_low:
+                raise ValueError(
+                    f"Portal username {username!r} is already in use by another tenant"
+                )
+
+
 def load_tenants_raw(state_dir: str | Path) -> list[dict[str, Any]]:
     sdir = Path(state_dir)
     doc = _read_store_unlocked(sdir / "tenants.json")
     return list(doc.get("tenants", []))
 
 
-def _to_public_tenant(rec: dict[str, Any]) -> dict[str, Any]:
+def _to_public_tenant(rec: dict[str, Any], *, grafana_login_url: str = "") -> dict[str, Any]:
+    users = normalize_portal_users(rec)
+    primary_viewer = _derive_primary_portal_username(users) or str(
+        rec.get("portal_viewer_username") or ""
+    )
+    customer = rec["customer"]
+    display_name = rec["display_name"]
     return {
-        "customer": rec["customer"],
-        "display_name": rec["display_name"],
+        "customer": customer,
+        "display_name": display_name,
         "sites": list(rec.get("sites", [])),
         "contact_emails": list(rec.get("contact_emails", [])),
         "token_prefix": rec["token_prefix"],
@@ -244,7 +538,10 @@ def _to_public_tenant(rec: dict[str, Any]) -> dict[str, Any]:
         "previous_token_expires_at": rec.get("previous_token_expires_at"),
         "customer_portal_enabled": bool(rec.get("customer_portal_enabled", False)),
         "grafana_org_id": rec.get("grafana_org_id"),
-        "portal_viewer_username": str(rec.get("portal_viewer_username") or ""),
+        "grafana_org_name": build_grafana_org_name(display_name, customer),
+        "grafana_login_url": grafana_login_url,
+        "portal_viewer_username": primary_viewer,
+        "portal_users_count": len(users),
         "last_ingest_at": rec.get("last_ingest_at"),
         "notes": str(rec.get("notes") or ""),
         "created_at": rec["created_at"],
@@ -258,11 +555,13 @@ def list_tenants(
     search: str = "",
     page: int = 1,
     page_size: int = 100,
+    env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     sdir = Path(state_dir)
     page = max(1, int(page))
     page_size = min(500, max(1, int(page_size)))
     needle = (search or "").strip().lower()
+    login_url = resolve_grafana_login_url(sdir, env)
 
     raw_list = load_tenants_raw(sdir)
     raw_list.sort(key=lambda item: str(item.get("customer", "")))
@@ -281,7 +580,7 @@ def list_tenants(
     total_pages = math.ceil(total_items / page_size) if total_items > 0 else 0
     start = (page - 1) * page_size
     end = start + page_size
-    sliced = [_to_public_tenant(t) for t in filtered[start:end]]
+    sliced = [_to_public_tenant(t, grafana_login_url=login_url) for t in filtered[start:end]]
 
     return {
         "tenants": sliced,
@@ -338,17 +637,9 @@ def save_tenant(
     viewer_pass = str(payload.get("portal_viewer_password") or "")
     notes = str(payload.get("notes") or "")[:1000]
 
-    if portal_enabled:
-        if not VIEWER_USER_RE.match(viewer_user):
-            raise ValueError("portal_viewer_username is required when customer_portal_enabled=true")
-    elif viewer_user and not VIEWER_USER_RE.match(viewer_user):
+    if viewer_user and not VIEWER_USER_RE.match(viewer_user):
         raise ValueError("Invalid portal_viewer_username")
-
-    reserved_names = set(RESERVED_PORTAL_USERNAMES)
-    env_admin = os.environ.get("GRAFANA_ADMIN_USER", "admin").strip().lower()
-    if env_admin:
-        reserved_names.add(env_admin)
-    if viewer_user and viewer_user.lower() in reserved_names:
+    if viewer_user and viewer_user.lower() in _reserved_usernames_set():
         raise ValueError(f"Reserved portal_viewer_username is not allowed: {viewer_user!r}")
 
     if viewer_pass and (len(viewer_pass) < 10 or any(c in viewer_pass for c in ("\r", "\n", "\x00"))):
@@ -365,25 +656,24 @@ def save_tenant(
             None,
         )
 
-        effective_viewer = viewer_user
-        if existing_idx is not None and not effective_viewer and portal_enabled:
-            effective_viewer = str(tenants[existing_idx].get("portal_viewer_username") or "").strip()
-
-        if effective_viewer:
-            eff_low = effective_viewer.lower()
-            if eff_low in reserved_names:
-                raise ValueError(f"Reserved portal_viewer_username is not allowed: {effective_viewer!r}")
-            for other in tenants:
-                if other.get("customer") == customer:
-                    continue
-                other_viewer = str(other.get("portal_viewer_username") or "").strip().lower()
-                if other_viewer and other_viewer == eff_low:
-                    raise ValueError(
-                        f"portal_viewer_username {effective_viewer!r} is already in use by another tenant"
-                    )
+        if viewer_user:
+            _assert_username_globally_available(tenants, customer, viewer_user)
 
         if existing_idx is None:
             raw_token, token_hash, token_prefix = _generate_bearer_token()
+            initial_users: list[dict[str, Any]] = []
+            if viewer_user:
+                initial_users.append(
+                    {
+                        "username": viewer_user,
+                        "full_name": f"{display_name} Portal Viewer",
+                        "email": f"{viewer_user}@{customer}.portal.local",
+                        "role": "Viewer",
+                        "disabled": False,
+                        "created_at": now_str,
+                        "updated_at": now_str,
+                    }
+                )
             rec: dict[str, Any] = {
                 "customer": customer,
                 "display_name": display_name,
@@ -400,7 +690,9 @@ def save_tenant(
                 "customer_portal_enabled": portal_enabled,
                 "grafana_org_id": None,
                 "portal_viewer_username": viewer_user,
+                "portal_users": initial_users,
                 "previous_portal_viewer_username": None,
+                "evicted_portal_usernames": [],
                 "last_ingest_at": None,
                 "notes": notes,
                 "created_at": now_str,
@@ -410,34 +702,272 @@ def save_tenant(
             tenants.sort(key=lambda item: str(item.get("customer", "")))
             _atomic_write_json(tenants_path, store_doc, mode=0o600)
             if viewer_pass:
-                save_portal_viewer_secret(sdir, customer, viewer_pass)
+                save_portal_viewer_secret(sdir, customer, viewer_pass, username=viewer_user or None)
             return dict(rec), raw_token
 
         rec = tenants[existing_idx]
-        prev_viewer = str(rec.get("portal_viewer_username") or "").strip()
-        next_viewer = (
-            viewer_user
-            if (viewer_user or not portal_enabled)
-            else prev_viewer
-        )
-        if not next_viewer and prev_viewer:
-            next_viewer = prev_viewer
+        users = normalize_portal_users(rec)
+        _backfill_legacy_user_secret(sdir, customer, rec, users)
+        for existing_u in users:
+            _assert_username_globally_available(tenants, customer, existing_u["username"])
 
-        if prev_viewer and next_viewer and prev_viewer.lower() != next_viewer.lower():
-            rec["previous_portal_viewer_username"] = prev_viewer
+        prev_viewer = str(rec.get("portal_viewer_username") or "").strip()
+        evicted: list[str] = [
+            str(u).strip()
+            for u in (rec.get("evicted_portal_usernames") or [])
+            if str(u).strip()
+        ]
+        renamed_old_viewer: str | None = None
+
+        if viewer_user:
+            match_idx = next(
+                (i for i, u in enumerate(users) if u["username"].lower() == viewer_user.lower()),
+                None,
+            )
+            if match_idx is not None:
+                users[match_idx]["username"] = viewer_user
+                users[match_idx]["updated_at"] = now_str
+            else:
+                prev_idx = (
+                    next(
+                        (i for i, u in enumerate(users) if u["username"].lower() == prev_viewer.lower()),
+                        None,
+                    )
+                    if prev_viewer
+                    else None
+                )
+                new_entry = {
+                    "username": viewer_user,
+                    "full_name": f"{display_name} Portal Viewer",
+                    "email": f"{viewer_user}@{customer}.portal.local",
+                    "role": "Viewer",
+                    "disabled": False,
+                    "created_at": now_str,
+                    "updated_at": now_str,
+                }
+                if prev_idx is not None:
+                    renamed_old_viewer = users[prev_idx]["username"]
+                    users[prev_idx] = new_entry
+                    rec["previous_portal_viewer_username"] = renamed_old_viewer
+                    if renamed_old_viewer.lower() not in {x.lower() for x in evicted}:
+                        evicted.append(renamed_old_viewer)
+                else:
+                    users.insert(0, new_entry)
+
+        primary_viewer = _derive_primary_portal_username(users)
 
         rec["display_name"] = display_name
         rec["sites"] = sites
         rec["default_site"] = sites[0]
         rec["contact_emails"] = emails
         rec["customer_portal_enabled"] = portal_enabled
-        rec["portal_viewer_username"] = next_viewer
+        rec["portal_users"] = users
+        rec["portal_viewer_username"] = primary_viewer
+        rec["evicted_portal_usernames"] = evicted
         rec["notes"] = notes
         rec["updated_at"] = now_str
         _atomic_write_json(tenants_path, store_doc, mode=0o600)
+
+        if renamed_old_viewer:
+            delete_portal_user_secret(
+                sdir,
+                customer,
+                renamed_old_viewer,
+                next_primary_username=primary_viewer,
+            )
         if viewer_pass:
-            save_portal_viewer_secret(sdir, customer, viewer_pass)
+            target_u = viewer_user or primary_viewer
+            save_portal_viewer_secret(sdir, customer, viewer_pass, username=target_u or None)
         return dict(rec), None
+
+
+def list_portal_users(
+    state_dir: str | Path,
+    customer: str,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Return multi-user portal account list & login metadata for a tenant (`list-portal-users`)."""
+    sdir = Path(state_dir)
+    slug = str(customer or "").strip()
+    if not CUSTOMER_RE.match(slug):
+        raise ValueError(f"Invalid customer slug: {slug!r}")
+
+    rec = next((t for t in load_tenants_raw(sdir) if t.get("customer") == slug), None)
+    if rec is None:
+        raise KeyError(f"Tenant not found: {slug}")
+
+    display_name = str(rec["display_name"])
+    return {
+        "customer": slug,
+        "display_name": display_name,
+        "customer_portal_enabled": bool(rec.get("customer_portal_enabled", False)),
+        "grafana_org_id": rec.get("grafana_org_id"),
+        "grafana_login_url": resolve_grafana_login_url(sdir, env),
+        "grafana_org_name": build_grafana_org_name(display_name, slug),
+        "users": normalize_portal_users(rec),
+    }
+
+
+def save_portal_user(
+    state_dir: str | Path,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Create or update a Customer Organization portal user (`Viewer` or `Editor`)."""
+    sdir = Path(state_dir)
+    customer = str(payload.get("customer") or "").strip()
+    if not CUSTOMER_RE.match(customer):
+        raise ValueError(f"Invalid customer slug: {customer!r}")
+
+    username = str(payload.get("username") or "").strip()
+    if not PORTAL_USER_RE.match(username):
+        raise ValueError(f"Invalid portal username: {username!r}")
+
+    role = str(payload.get("role") or "").strip()
+    if role not in ALLOWED_PORTAL_ROLES:
+        raise ValueError(f"Invalid portal role {role!r}; allowed: Viewer, Editor")
+
+    full_name = str(payload.get("full_name") or "").strip()
+    if len(full_name) > 128 or any(c in full_name for c in ("\r", "\n", "\x00")):
+        raise ValueError("full_name must be <= 128 valid characters")
+
+    email = str(payload.get("email") or "").strip()
+    if email and (len(email) > 254 or not EMAIL_RE.match(email)):
+        raise ValueError(f"Invalid email address: {email!r}")
+
+    disabled = bool(payload.get("disabled", False))
+    password = str(payload.get("password") or "")
+    password_unchanged = bool(payload.get("password_unchanged", False))
+
+    if password and (
+        len(password) < 10
+        or len(password) > 256
+        or any(c in password for c in ("\r", "\n", "\x00"))
+    ):
+        raise ValueError("password must be between 10 and 256 valid characters")
+    if not password_unchanged and not password:
+        raise ValueError("password is required unless password_unchanged is true")
+
+    tenants_path = sdir / "tenants.json"
+    now_str = _iso_utc()
+
+    with _file_lock(sdir / ".tenants.lock"):
+        store_doc = _read_store_unlocked(tenants_path)
+        tenants: list[dict[str, Any]] = store_doc["tenants"]
+        rec = next((t for t in tenants if t.get("customer") == customer), None)
+        if rec is None:
+            raise KeyError(f"Tenant not found: {customer}")
+
+        _assert_username_globally_available(tenants, customer, username)
+
+        users = normalize_portal_users(rec)
+        _backfill_legacy_user_secret(sdir, customer, rec, users)
+        existing_idx = next(
+            (i for i, u in enumerate(users) if u["username"].lower() == username.lower()),
+            None,
+        )
+
+        if existing_idx is None:
+            if not password:
+                raise ValueError("password is required when creating a new portal user")
+            saved_user = {
+                "username": username,
+                "full_name": full_name,
+                "email": email,
+                "role": role,
+                "disabled": disabled,
+                "created_at": now_str,
+                "updated_at": now_str,
+            }
+            users.append(saved_user)
+        else:
+            prev_u = users[existing_idx]
+            saved_user = {
+                "username": username,
+                "full_name": full_name,
+                "email": email,
+                "role": role,
+                "disabled": disabled,
+                "created_at": str(prev_u.get("created_at") or now_str),
+                "updated_at": now_str,
+            }
+            users[existing_idx] = saved_user
+
+        # Remove from pending eviction list if re-created with same username
+        evicted = [
+            str(u).strip()
+            for u in (rec.get("evicted_portal_usernames") or [])
+            if str(u).strip() and str(u).strip().lower() != username.lower()
+        ]
+        primary_viewer = _derive_primary_portal_username(users)
+        rec["portal_users"] = users
+        rec["portal_viewer_username"] = primary_viewer
+        rec["evicted_portal_usernames"] = evicted
+        rec["updated_at"] = now_str
+        _atomic_write_json(tenants_path, store_doc, mode=0o600)
+
+        if password:
+            save_portal_user_secret(
+                sdir,
+                customer,
+                username,
+                password,
+                is_primary=(primary_viewer.lower() == username.lower()),
+            )
+
+    return dict(saved_user)
+
+
+def delete_portal_user(
+    state_dir: str | Path,
+    customer: str,
+    username: str,
+) -> tuple[bool, dict[str, Any] | None]:
+    """Delete a Customer Organization portal user (`delete-portal-user`)."""
+    sdir = Path(state_dir)
+    slug = str(customer or "").strip()
+    if not CUSTOMER_RE.match(slug):
+        raise ValueError(f"Invalid customer slug: {slug!r}")
+    uname = str(username or "").strip()
+    if not VIEWER_USER_RE.match(uname):
+        raise ValueError(f"Invalid portal username: {uname!r}")
+
+    tenants_path = sdir / "tenants.json"
+    now_str = _iso_utc()
+
+    with _file_lock(sdir / ".tenants.lock"):
+        store_doc = _read_store_unlocked(tenants_path)
+        rec = next((t for t in store_doc["tenants"] if t.get("customer") == slug), None)
+        if rec is None:
+            return False, None
+
+        users = normalize_portal_users(rec)
+        _backfill_legacy_user_secret(sdir, slug, rec, users)
+        remaining = [u for u in users if u["username"].lower() != uname.lower()]
+        removed = len(remaining) != len(users)
+
+        if removed:
+            next_primary = _derive_primary_portal_username(remaining)
+            evicted = [
+                str(u).strip()
+                for u in (rec.get("evicted_portal_usernames") or [])
+                if str(u).strip()
+            ]
+            if uname.lower() not in {x.lower() for x in evicted}:
+                evicted.append(uname)
+            rec["portal_users"] = remaining
+            rec["portal_viewer_username"] = next_primary
+            rec["evicted_portal_usernames"] = evicted
+            rec["updated_at"] = now_str
+            _atomic_write_json(tenants_path, store_doc, mode=0o600)
+            delete_portal_user_secret(
+                sdir,
+                slug,
+                uname,
+                next_primary_username=next_primary,
+            )
+
+        return removed, dict(rec)
 
 
 def clear_previous_portal_viewer_username(state_dir: str | Path, customer: str) -> None:
@@ -446,8 +976,11 @@ def clear_previous_portal_viewer_username(state_dir: str | Path, customer: str) 
     with _file_lock(sdir / ".tenants.lock"):
         store_doc = _read_store_unlocked(tenants_path)
         for rec in store_doc["tenants"]:
-            if rec.get("customer") == customer and rec.get("previous_portal_viewer_username"):
+            if rec.get("customer") == customer and (
+                rec.get("previous_portal_viewer_username") or rec.get("evicted_portal_usernames")
+            ):
                 rec["previous_portal_viewer_username"] = None
+                rec["evicted_portal_usernames"] = []
                 _atomic_write_json(tenants_path, store_doc, mode=0o600)
                 break
 

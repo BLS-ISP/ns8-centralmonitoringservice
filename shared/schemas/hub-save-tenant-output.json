@@ -17,6 +17,9 @@
       "type": ["string", "null"],
       "description": "Plaintext bearer token returned ONLY upon initial creation; null on updates (use rotate-token to issue a new secret)."
     },
-    "grafana_org_id": { "type": ["integer", "null"] }
+    "grafana_org_id": { "type": ["integer", "null"] },
+    "grafana_org_name": { "type": "string" },
+    "grafana_login_url": { "type": "string" },
+    "portal_users_count": { "type": "integer", "minimum": 0 }
   }
 }

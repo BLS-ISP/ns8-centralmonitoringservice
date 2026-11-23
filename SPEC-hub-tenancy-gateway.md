@@ -65,9 +65,9 @@ hub/
   imageroot/
     pypkg/
       hub_tenancy/
-        store.py                       -> Atomic file-locked CRUD on state/tenants.json (0600) + token hashing/rotation
-        grafana_sync.py                -> Idempotent Grafana HTTP API client syncing Org 1, Customer Orgs, datasources, dashboards
-        ldap_sync.py                   -> Queries agent.ldapproxy.Ldapproxy and renders Grafana ldap.toml
+        store.py                       -> Atomic file-locked CRUD on state/tenants.json & portal users (0600) + token hashing/rotation
+        grafana_sync.py                -> Idempotent Grafana HTTP API client syncing Org 1, Customer Orgs, multi-user accounts, datasources, dashboards
+        ldap_sync.py                   -> Queries agent.ldapproxy.Ldapproxy, discovers AD/LDAP groups, tests user role mappings & renders ldap.toml
         bundle_renderer.py             -> Renders shared/alloy-templates/*.tmpl with strict escaping
     actions/
       list-tenants/                    -> validate-input.json, validate-output.json, 20read
@@ -75,6 +75,11 @@ hub/
       delete-tenant/                   -> validate-input.json, validate-output.json, 20delete
       rotate-token/                    -> validate-input.json, validate-output.json, 20rotate
       generate-agent-bundle/           -> validate-input.json, validate-output.json, 20generate
+      discover-ldap-groups/            -> validate-input.json, validate-output.json, 20discover
+      test-ldap-user/                  -> validate-input.json, validate-output.json, 20test
+      list-portal-users/               -> validate-input.json, validate-output.json, 20read
+      save-portal-user/                -> validate-input.json, validate-output.json, 20save
+      delete-portal-user/              -> validate-input.json, validate-output.json, 20delete
 tests/
   hub_tenancy_gateway/                 -> Unit, async HTTP integration, and cross-tenant spoofing security tests
 ```
@@ -99,14 +104,21 @@ tests/
    - Datasource `Prometheus` (`uid: "prometheus"`, `isDefault: true`, `editable: false`): URL `${PROMQL_UPSTREAM_URL}` (`http://127.0.0.1:9090` in `local` mode; `http://127.0.0.1:10902` Thanos Query in `s3` mode).
    - Datasource `Loki` (`uid: "loki"`, `editable: false`): URL `http://127.0.0.1:3100` with `httpHeaderName1: "X-Scope-OrgID"` and `secureJsonData.httpHeaderValue1` set to the pipe-joined list of all registered tenant slugs plus `_msp_internal` (e.g., `acme-corp|beta-gmbh|_msp_internal`). Re-synced automatically on every `save-tenant` / `delete-tenant`!
    - Dashboards: All 4 JSON models from `shared/dashboards/` imported into folder `MSP Central Monitoring`.
-   - **NS8 LDAP/AD SSO (`ldap_enabled == true`):** Queries `Ldapproxy().get_domain(ldap_domain)`, maps host `10.0.2.2` and proxy port into `/etc/grafana/ldap.toml`, maps `ldap_admin_group` -> Org 1 `Admin`, `ldap_editor_group` -> Org 1 `Editor`, and explicitly restricts LDAP group mappings to `org_id = 1` so MSP technicians never land in a Customer Org by mistake while Customer Portal users authenticate strictly via local Grafana credentials scoped to their Customer Org (`allow_sign_up = false`, `auto_assign_org = true`, `auto_assign_org_id = 1`).
-2. **Customer Portal Organization (`customer_portal_enabled == true`):**
+   - **NS8 LDAP/AD SSO (`ldap_enabled == true`) + Live Group Discovery & Login Tester:**
+     - Queries `Ldapproxy().get_domain(ldap_domain)`, maps host `10.0.2.2` and proxy port into `/etc/grafana/ldap.toml` (mounted via parent directory `--volume=%E/config/grafana:/etc/grafana:ro,z` so atomic `os.replace` updates take effect immediately without stale inodes).
+     - Maps `ldap_admin_group` -> Org 1 `Admin` (`grafana_admin = true` optional/Org 1 Admin), `ldap_editor_group` -> Org 1 `Editor`, and `ldap_viewer_group` -> Org 1 `Viewer` (accepting either short group CN like `Domain Admins` or full Distinguished Name up to 512 chars like `CN=Domain Admins,CN=Users,DC=ad,DC=bls-isp,DC=net`), explicitly restricting all LDAP mappings to `org_id = 1` with **no** wildcard `group_dn = "*"` fallback when explicit groups are configured.
+     - `discover-ldap-groups` connects via `Ldapproxy` (`127.0.0.1:<port>` from host action) to enumerate AD (`objectClass=group`) and RFC2307 (`objectClass=posixGroup` / `groupOfNames`) groups (`{name, dn, description}`).
+     - `test-ldap-user` resolves a target username against the selected NS8 domain, inspects `memberOf` (including AD nested/primary group resolution where available) / RFC2307 `memberUid`+`member`, and returns `{ok, found, username, user_dn, display_name, email, member_of, matched_role, grafana_admin, message}` without requiring the user's password.
+2. **Customer Portal Organization & Multi-User Account Management (`customer_portal_enabled == true`):**
    - Dedicated Grafana Org named `Customer: <display_name> (<customer>)`.
    - Datasource `Prometheus` (`uid: "prometheus"`, `access: "proxy"`, `editable: false`): URL `http://127.0.0.1:9095` (`prom-label-proxy`), `httpHeaderName1: "X-Scope-OrgID"`, `secureJsonData.httpHeaderValue1: "<customer>"`.
    - Datasource `Loki` (`uid: "loki"`, `access: "proxy"`, `editable: false`): URL `http://127.0.0.1:3100`, `httpHeaderName1: "X-Scope-OrgID"`, `secureJsonData.httpHeaderValue1: "<customer>"`.
-   - User `<portal_viewer_username>` assigned **strictly `Viewer` role** in that Customer Org (and removed from Org 1!).
+   - **Multi-User Accounts (`list-portal-users`, `save-portal-user`, `delete-portal-user`):**
+     - Supports multiple local Grafana accounts per tenant (`role`: `"Viewer"` or `"Editor"` scoped **strictly** to that tenant's Customer Org, never `Admin`, never `isGrafanaAdmin`, and **always** evicted from Org 1 and all other Customer Orgs!). Because datasources are `editable: false` and `hub-gateway` restricts `/api/datasources/proxy/*` strictly to read-only query paths, even Customer Org `Editor`s (who can build/customize dashboards inside their own Customer Org) can **never** query or write another tenant's metrics or logs!
+     - Usernames (`^[a-zA-Z0-9._-]{3,64}$`) enforce global case-insensitive uniqueness across all tenants and block reserved names (`admin`, `root`, `GRAFANA_ADMIN_USER`).
+     - Supports `disabled: true|false` per user and `password_unchanged: true` on edits; `list-tenants` exposes `portal_users_count` plus backward-compatible primary `portal_viewer_username` and `grafana_login_url`.
    - Copies of the 4 starter dashboards imported into the Customer Org with `$customer` locked/hidden to `<customer>`.
-   - Toggling `customer_portal_enabled` to `false` disables/removes the portal viewer user's access immediately without deleting historical TSDB/Loki telemetry.
+   - Toggling `customer_portal_enabled` to `false` disables/evicts all portal users' access immediately without deleting historical TSDB/Loki telemetry.
 
 ---
 

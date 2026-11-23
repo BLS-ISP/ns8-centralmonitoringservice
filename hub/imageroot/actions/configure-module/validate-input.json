@@ -122,15 +122,21 @@
     },
     "ldap_admin_group": {
       "type": "string",
-      "maxLength": 256,
+      "maxLength": 512,
       "default": "Domain Admins",
-      "description": "LDAP group CN/DN mapped to Grafana Org 1 Admin role."
+      "description": "LDAP/AD group short CN or full Distinguished Name mapped to Grafana Org 1 Admin role."
     },
     "ldap_editor_group": {
       "type": "string",
-      "maxLength": 256,
+      "maxLength": 512,
       "default": "",
-      "description": "Optional LDAP group CN/DN mapped to Grafana Org 1 Editor role; other authenticated LDAP users map to Viewer."
+      "description": "Optional LDAP/AD group short CN or full Distinguished Name mapped to Grafana Org 1 Editor role."
+    },
+    "ldap_viewer_group": {
+      "type": "string",
+      "maxLength": 512,
+      "default": "",
+      "description": "Optional LDAP/AD group short CN or full Distinguished Name mapped to Grafana Org 1 Viewer role."
     },
     "grafana_admin_password": {
       "type": "string",

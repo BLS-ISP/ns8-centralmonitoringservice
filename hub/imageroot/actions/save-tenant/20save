@@ -14,7 +14,14 @@ for _candidate in (
         sys.path.append(str(_candidate))
 
 from hub_tenancy.grafana_sync import sync_all_orgs_if_running  # noqa: E402
-from hub_tenancy.store import load_tenants_raw, resolve_state_dir, save_tenant  # noqa: E402
+from hub_tenancy.store import (  # noqa: E402
+    build_grafana_org_name,
+    load_tenants_raw,
+    normalize_portal_users,
+    resolve_grafana_login_url,
+    resolve_state_dir,
+    save_tenant,
+)
 
 
 def _fail_validation(field: str, value: object, error_code: str) -> None:
@@ -56,6 +63,7 @@ def main() -> None:
         (t for t in load_tenants_raw(state_dir) if t.get("customer") == rec["customer"]),
         rec,
     )
+    users = normalize_portal_users(refreshed)
     output = {
         "status": "ok",
         "customer": refreshed["customer"],
@@ -63,6 +71,11 @@ def main() -> None:
         "token_prefix": refreshed["token_prefix"],
         "auth_token": auth_token,
         "grafana_org_id": refreshed.get("grafana_org_id"),
+        "grafana_org_name": build_grafana_org_name(
+            refreshed["display_name"], refreshed["customer"]
+        ),
+        "grafana_login_url": resolve_grafana_login_url(state_dir, os.environ),
+        "portal_users_count": len(users),
     }
     json.dump(output, sys.stdout)
     sys.stdout.write("\n")

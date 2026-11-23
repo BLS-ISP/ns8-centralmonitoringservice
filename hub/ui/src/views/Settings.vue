@@ -237,19 +237,21 @@
           :label="$t('settings.ldap_enabled_label')"
           value="ldapEnabled"
           :disabled="saving"
+          @change="onLdapEnabledChange"
         >
           <template slot="text-left">{{ $t("common.disabled") }}</template>
           <template slot="text-right">{{ $t("common.enabled") }}</template>
         </NsToggle>
 
         <div v-if="form.ldap_enabled" class="mg-top-md">
-          <div class="form-grid-2">
-            <div>
+          <div class="ldap-test-row mg-bottom-md">
+            <div class="ldap-test-row__input">
               <cv-select
                 v-if="availableLdapDomains.length"
                 v-model="form.ldap_domain"
                 :label="$t('settings.ldap_domain_label')"
                 :disabled="saving"
+                @change="onLdapDomainChange"
               >
                 <cv-select-option
                   v-for="dom in availableLdapDomains"
@@ -269,21 +271,230 @@
               />
             </div>
 
+            <NsButton
+              kind="secondary"
+              size="field"
+              type="button"
+              :icon="Renew20"
+              :loading="discoveringLdapGroups"
+              :disabled="saving || discoveringLdapGroups || !form.ldap_domain.trim()"
+              @click="discoverLdapGroups"
+            >
+              {{ $t("settings.ldap_reload_groups_btn") }}
+            </NsButton>
+          </div>
+
+          <p
+            v-if="discoveredLdapMeta.ok && discoveredLdapGroups.length"
+            class="form-section-desc"
+          >
+            {{
+              $t("settings.ldap_discovered_summary", {
+                schema: discoveredLdapMeta.schema || "ldap",
+                base_dn: discoveredLdapMeta.base_dn || "-",
+                count: discoveredLdapGroups.length,
+              })
+            }}
+          </p>
+
+          <NsInlineNotification
+            v-if="discoveredLdapMeta.error"
+            kind="warning"
+            :title="$t('settings.ldap_discover_failed_title')"
+            :description="discoveredLdapMeta.error"
+            :showCloseButton="true"
+            @close="discoveredLdapMeta.error = ''"
+            class="mg-bottom-md"
+          />
+
+          <NsToggle
+            v-if="discoveredLdapGroups.length > 0"
+            v-model="manualLdapDnMode"
+            :label="$t('settings.ldap_manual_dn_toggle')"
+            value="manualLdapDnMode"
+            :disabled="saving"
+          >
+            <template slot="text-left">{{ $t("common.no") }}</template>
+            <template slot="text-right">{{ $t("common.yes") }}</template>
+          </NsToggle>
+
+          <!-- Dropdown Selectors when groups discovered and not in manual mode -->
+          <div
+            v-if="discoveredLdapGroups.length > 0 && !manualLdapDnMode"
+            class="mg-top-md"
+          >
+            <div class="form-grid-2 mg-bottom-md">
+              <cv-select
+                v-model="form.ldap_admin_group"
+                :label="$t('settings.ldap_admin_group_label')"
+                :disabled="saving"
+              >
+                <cv-select-option value="">
+                  {{ $t("settings.ldap_no_group_assigned") }}
+                </cv-select-option>
+                <cv-select-option
+                  v-for="grp in ldapGroupOptionsFor(form.ldap_admin_group)"
+                  :key="`admin-${grp.dn}`"
+                  :value="grp.dn"
+                >
+                  {{ formatLdapGroupOption(grp) }}
+                </cv-select-option>
+              </cv-select>
+
+              <cv-select
+                v-model="form.ldap_editor_group"
+                :label="$t('settings.ldap_editor_group_label')"
+                :disabled="saving"
+              >
+                <cv-select-option value="">
+                  {{ $t("settings.ldap_no_group_assigned") }}
+                </cv-select-option>
+                <cv-select-option
+                  v-for="grp in ldapGroupOptionsFor(form.ldap_editor_group)"
+                  :key="`editor-${grp.dn}`"
+                  :value="grp.dn"
+                >
+                  {{ formatLdapGroupOption(grp) }}
+                </cv-select-option>
+              </cv-select>
+            </div>
+
+            <cv-select
+              v-model="form.ldap_viewer_group"
+              :label="$t('settings.ldap_viewer_group_label')"
+              :disabled="saving"
+            >
+              <cv-select-option value="">
+                {{ $t("settings.ldap_no_group_assigned") }}
+              </cv-select-option>
+              <cv-select-option
+                v-for="grp in ldapGroupOptionsFor(form.ldap_viewer_group)"
+                :key="`viewer-${grp.dn}`"
+                :value="grp.dn"
+              >
+                {{ formatLdapGroupOption(grp) }}
+              </cv-select-option>
+            </cv-select>
+
+            <p class="form-section-desc mg-top-md">
+              {{ $t("settings.ldap_editor_group_helper") }}
+            </p>
+          </div>
+
+          <!-- Manual DN / CN Inputs when no groups discovered or manual mode active -->
+          <div v-else class="mg-top-md">
+            <div class="form-grid-2">
+              <NsTextInput
+                v-model.trim="form.ldap_admin_group"
+                :label="$t('settings.ldap_admin_group_label')"
+                placeholder="CN=Domain Admins,CN=Users,DC=ad,DC=msp,DC=example,DC=com"
+                :disabled="saving"
+              />
+
+              <NsTextInput
+                v-model.trim="form.ldap_editor_group"
+                :label="$t('settings.ldap_editor_group_label')"
+                placeholder="CN=MSP Engineers,CN=Users,DC=ad,DC=msp,DC=example,DC=com"
+                :disabled="saving"
+              />
+            </div>
+
             <NsTextInput
-              v-model.trim="form.ldap_admin_group"
-              :label="$t('settings.ldap_admin_group_label')"
-              placeholder="Domain Admins"
+              v-model.trim="form.ldap_viewer_group"
+              :label="$t('settings.ldap_viewer_group_label')"
+              :helper-text="$t('settings.ldap_editor_group_helper')"
+              placeholder="CN=MSP ReadOnly,CN=Users,DC=ad,DC=msp,DC=example,DC=com"
               :disabled="saving"
             />
           </div>
 
-          <NsTextInput
-            v-model.trim="form.ldap_editor_group"
-            :label="$t('settings.ldap_editor_group_label')"
-            :helper-text="$t('settings.ldap_editor_group_helper')"
-            placeholder="MSP Engineers"
-            :disabled="saving"
-          />
+          <!-- Inline AD/LDAP User & Role Mapping Tester -->
+          <div class="ldap-test-box">
+            <h3 class="form-section-title">
+              {{ $t("settings.ldap_test_section_title") }}
+            </h3>
+            <p class="form-section-desc">
+              {{ $t("settings.ldap_test_section_desc") }}
+            </p>
+
+            <div class="ldap-test-row">
+              <div class="ldap-test-row__input">
+                <NsTextInput
+                  v-model.trim="ldapTestUsername"
+                  :label="$t('settings.ldap_test_username_label')"
+                  :placeholder="$t('settings.ldap_test_username_placeholder')"
+                  :disabled="saving || testingLdapUser"
+                  :invalid-message="ldapTestValidationError"
+                  @keydown.enter.prevent="runTestLdapUser"
+                />
+              </div>
+              <NsButton
+                kind="secondary"
+                size="field"
+                type="button"
+                :icon="Search20"
+                :loading="testingLdapUser"
+                :disabled="saving || testingLdapUser || !form.ldap_domain.trim()"
+                @click="runTestLdapUser"
+              >
+                {{ $t("settings.ldap_test_user_btn") }}
+              </NsButton>
+            </div>
+
+            <NsInlineNotification
+              v-if="ldapTestResult"
+              :kind="ldapTestNotificationKind"
+              :title="ldapTestNotificationTitle"
+              :showCloseButton="true"
+              @close="ldapTestResult = null"
+              class="mg-top-md"
+            >
+              <template #description>
+                <div>
+                  <p v-if="ldapTestResult.message" class="mg-bottom-sm">
+                    {{ ldapTestResult.message }}
+                  </p>
+                  <div v-if="ldapTestResult.found">
+                    <div v-if="ldapTestResult.user_dn" class="mg-bottom-sm">
+                      <strong>{{ $t("settings.ldap_test_user_dn_label") }}:</strong>
+                      <span class="mono-text">{{ ldapTestResult.user_dn }}</span>
+                    </div>
+                    <div
+                      v-if="ldapTestResult.display_name || ldapTestResult.email"
+                      class="mg-bottom-sm"
+                    >
+                      <strong>{{ $t("settings.ldap_test_display_name_label") }}:</strong>
+                      <span>
+                        {{ ldapTestResult.display_name || ldapTestResult.username }}
+                        <span v-if="ldapTestResult.email">
+                          ({{ ldapTestResult.email }})
+                        </span>
+                      </span>
+                    </div>
+                    <div>
+                      <strong>{{ $t("settings.ldap_test_groups_label") }}:</strong>
+                      <span
+                        v-if="
+                          !ldapTestResult.member_of ||
+                          !ldapTestResult.member_of.length
+                        "
+                      >
+                        {{ $t("settings.ldap_test_no_groups") }}
+                      </span>
+                      <div v-else class="tag-list mg-top-md">
+                        <NsTag
+                          v-for="grpDn in ldapTestResult.member_of"
+                          :key="grpDn"
+                          kind="gray"
+                          :label="grpDn"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </NsInlineNotification>
+          </div>
         </div>
 
         <div class="form-section-divider">
@@ -354,6 +565,7 @@ import {
 import Save20 from "@carbon/icons-vue/es/save/20";
 import Renew20 from "@carbon/icons-vue/es/renew/20";
 import Launch20 from "@carbon/icons-vue/es/launch/20";
+import Search20 from "@carbon/icons-vue/es/search/20";
 
 const FQDN_RE =
   /^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$/;
@@ -370,8 +582,22 @@ export default {
       Save20,
       Renew20,
       Launch20,
+      Search20,
       loading: false,
       saving: false,
+      discoveringLdapGroups: false,
+      testingLdapUser: false,
+      manualLdapDnMode: false,
+      discoveredLdapGroups: [],
+      discoveredLdapMeta: {
+        ok: false,
+        schema: "",
+        base_dn: "",
+        error: "",
+      },
+      ldapTestUsername: "",
+      ldapTestValidationError: "",
+      ldapTestResult: null,
       hasS3SecretKey: false,
       hasGrafanaAdminPassword: false,
       availableLdapDomains: [],
@@ -404,12 +630,39 @@ export default {
         ldap_domain: "",
         ldap_admin_group: "Domain Admins",
         ldap_editor_group: "",
+        ldap_viewer_group: "",
         grafana_admin_password: "",
       },
     };
   },
   computed: {
     ...mapState(["instanceName", "appName", "core"]),
+    ldapTestNotificationKind() {
+      if (!this.ldapTestResult) {
+        return "info";
+      }
+      if (!this.ldapTestResult.ok || !this.ldapTestResult.found) {
+        return "error";
+      }
+      if (this.ldapTestResult.matched_role === "None") {
+        return "warning";
+      }
+      return "success";
+    },
+    ldapTestNotificationTitle() {
+      if (!this.ldapTestResult) {
+        return "";
+      }
+      if (!this.ldapTestResult.ok || !this.ldapTestResult.found) {
+        return this.$t("settings.ldap_test_not_found_title");
+      }
+      if (this.ldapTestResult.matched_role === "None") {
+        return this.$t("settings.ldap_test_unmapped_title");
+      }
+      return this.$t("settings.ldap_test_matched_title", {
+        role: this.ldapTestResult.matched_role,
+      });
+    },
   },
   watch: {
     instanceName: {
@@ -430,6 +683,211 @@ export default {
       if (this.grafanaUrl) {
         window.open(this.grafanaUrl, "_blank", "noopener,noreferrer");
       }
+    },
+    formatLdapGroupOption(grp) {
+      if (!grp) {
+        return "";
+      }
+      if (grp.name && grp.dn && grp.name !== grp.dn) {
+        return `${grp.name} — ${grp.dn}`;
+      }
+      return grp.dn || grp.name || "";
+    },
+    ldapGroupOptionsFor(currentValue) {
+      const val = (currentValue || "").trim();
+      if (!val) {
+        return this.discoveredLdapGroups;
+      }
+      const exists = this.discoveredLdapGroups.some(
+        (g) => g.dn === val || g.name === val
+      );
+      if (exists) {
+        return this.discoveredLdapGroups;
+      }
+      return [
+        { name: val, dn: val, description: "" },
+        ...this.discoveredLdapGroups,
+      ];
+    },
+    normalizeGroupSelectionWithDiscovered(rawValue) {
+      const val = (rawValue || "").trim();
+      if (!val || !this.discoveredLdapGroups.length) {
+        return val;
+      }
+      const lower = val.toLowerCase();
+      const byDn = this.discoveredLdapGroups.find(
+        (g) => (g.dn || "").toLowerCase() === lower
+      );
+      if (byDn) {
+        return byDn.dn;
+      }
+      const byName = this.discoveredLdapGroups.find(
+        (g) => (g.name || "").toLowerCase() === lower
+      );
+      if (byName) {
+        return byName.dn;
+      }
+      return val;
+    },
+    onLdapEnabledChange() {
+      if (this.form.ldap_enabled) {
+        if (!this.form.ldap_domain && this.availableLdapDomains.length) {
+          this.form.ldap_domain = this.availableLdapDomains[0];
+        }
+        if (this.form.ldap_domain.trim()) {
+          this.discoverLdapGroups();
+        }
+      }
+    },
+    onLdapDomainChange() {
+      this.ldapTestResult = null;
+      if (this.form.ldap_enabled && this.form.ldap_domain.trim()) {
+        this.discoverLdapGroups();
+      }
+    },
+    async discoverLdapGroups() {
+      const domain = (this.form.ldap_domain || "").trim();
+      if (!domain) {
+        return;
+      }
+      this.discoveringLdapGroups = true;
+      this.discoveredLdapMeta.error = "";
+      const taskAction = "discover-ldap-groups";
+      const eventId = this.getUuid();
+
+      (this.core && this.core.$root ? this.core.$root : this.$root).$once(
+        `${taskAction}-aborted-${eventId}`,
+        this.discoverLdapGroupsAborted
+      );
+      (this.core && this.core.$root ? this.core.$root : this.$root).$once(
+        `${taskAction}-completed-${eventId}`,
+        this.discoverLdapGroupsCompleted
+      );
+
+      const res = await this.to(
+        this.createModuleTaskForApp(this.instanceName, {
+          action: taskAction,
+          data: { domain },
+          extra: {
+            title: this.$t("action.discover-ldap-groups"),
+            isNotificationHidden: true,
+            eventId,
+          },
+        })
+      );
+      const err = res[0];
+      if (err) {
+        this.discoveringLdapGroups = false;
+        this.createErrorNotificationForApp(
+          err,
+          this.$t("task.cannot_create_task")
+        );
+      }
+    },
+    discoverLdapGroupsAborted(taskError, taskContext) {
+      console.error(`${taskContext.action} aborted`, taskError);
+      this.discoveringLdapGroups = false;
+      this.discoveredLdapMeta = {
+        ok: false,
+        schema: "",
+        base_dn: "",
+        error: this.$t("settings.ldap_discover_failed_title"),
+      };
+    },
+    discoverLdapGroupsCompleted(taskContext, taskResult) {
+      this.discoveringLdapGroups = false;
+      const out = (taskResult && taskResult.output) || {};
+      this.discoveredLdapMeta = {
+        ok: Boolean(out.ok),
+        schema: out.schema || "",
+        base_dn: out.base_dn || "",
+        error: out.ok ? "" : out.error || "",
+      };
+      this.discoveredLdapGroups = Array.isArray(out.groups) ? out.groups : [];
+      if (this.discoveredLdapGroups.length > 0) {
+        this.form.ldap_admin_group = this.normalizeGroupSelectionWithDiscovered(
+          this.form.ldap_admin_group
+        );
+        this.form.ldap_editor_group =
+          this.normalizeGroupSelectionWithDiscovered(
+            this.form.ldap_editor_group
+          );
+        this.form.ldap_viewer_group =
+          this.normalizeGroupSelectionWithDiscovered(
+            this.form.ldap_viewer_group
+          );
+      }
+    },
+    async runTestLdapUser() {
+      this.ldapTestValidationError = "";
+      const username = (this.ldapTestUsername || "").trim();
+      const domain = (this.form.ldap_domain || "").trim();
+      if (!username) {
+        this.ldapTestValidationError = this.$t(
+          "settings.ldap_test_validation_username"
+        );
+        return;
+      }
+      if (!domain) {
+        this.validationErrors = Object.assign({}, this.validationErrors, {
+          ldap_domain: this.$t("settings.validation_ldap_domain"),
+        });
+        return;
+      }
+
+      this.testingLdapUser = true;
+      this.ldapTestResult = null;
+      const payload = {
+        domain,
+        username,
+        ldap_admin_group: (this.form.ldap_admin_group || "").trim(),
+        ldap_editor_group: (this.form.ldap_editor_group || "").trim(),
+        ldap_viewer_group: (this.form.ldap_viewer_group || "").trim(),
+      };
+      const taskAction = "test-ldap-user";
+      const eventId = this.getUuid();
+
+      (this.core && this.core.$root ? this.core.$root : this.$root).$once(
+        `${taskAction}-aborted-${eventId}`,
+        this.testLdapUserAborted
+      );
+      (this.core && this.core.$root ? this.core.$root : this.$root).$once(
+        `${taskAction}-completed-${eventId}`,
+        this.testLdapUserCompleted
+      );
+
+      const res = await this.to(
+        this.createModuleTaskForApp(this.instanceName, {
+          action: taskAction,
+          data: payload,
+          extra: {
+            title: this.$t("action.test-ldap-user"),
+            description: username,
+            isNotificationHidden: true,
+            eventId,
+          },
+        })
+      );
+      const err = res[0];
+      if (err) {
+        this.testingLdapUser = false;
+        this.createErrorNotificationForApp(
+          err,
+          this.$t("task.cannot_create_task")
+        );
+      }
+    },
+    testLdapUserAborted(taskError, taskContext) {
+      console.error(`${taskContext.action} aborted`, taskError);
+      this.testingLdapUser = false;
+      this.createErrorNotificationForApp(
+        taskError,
+        this.$t("settings.ldap_test_not_found_title")
+      );
+    },
+    testLdapUserCompleted(taskContext, taskResult) {
+      this.testingLdapUser = false;
+      this.ldapTestResult = (taskResult && taskResult.output) || null;
     },
     async getConfiguration() {
       this.loading = true;
@@ -516,10 +974,18 @@ export default {
           (this.availableLdapDomains.length
             ? this.availableLdapDomains[0]
             : ""),
-        ldap_admin_group: cfg.ldap_admin_group || "Domain Admins",
+        ldap_admin_group:
+          cfg.ldap_admin_group !== undefined
+            ? cfg.ldap_admin_group
+            : "Domain Admins",
         ldap_editor_group: cfg.ldap_editor_group || "",
+        ldap_viewer_group: cfg.ldap_viewer_group || "",
         grafana_admin_password: "",
       };
+
+      if (this.form.ldap_enabled && this.form.ldap_domain.trim()) {
+        this.discoverLdapGroups();
+      }
     },
     validateSettingsForm() {
       const errors = {};
@@ -604,8 +1070,9 @@ export default {
         },
         ldap_enabled: Boolean(this.form.ldap_enabled),
         ldap_domain: this.form.ldap_domain.trim(),
-        ldap_admin_group: this.form.ldap_admin_group.trim() || "Domain Admins",
+        ldap_admin_group: this.form.ldap_admin_group.trim(),
         ldap_editor_group: this.form.ldap_editor_group.trim(),
+        ldap_viewer_group: this.form.ldap_viewer_group.trim(),
         grafana_admin_password: this.form.grafana_admin_password || "",
       };
     },

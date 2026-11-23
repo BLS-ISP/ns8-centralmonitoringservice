@@ -278,6 +278,7 @@ def build_get_configuration_response(
         "ldap_domain": env.get("LDAP_DOMAIN", ""),
         "ldap_admin_group": env.get("LDAP_ADMIN_GROUP", "Domain Admins"),
         "ldap_editor_group": env.get("LDAP_EDITOR_GROUP", ""),
+        "ldap_viewer_group": env.get("LDAP_VIEWER_GROUP", ""),
         "available_ldap_domains": list_available_ldap_domains(),
         "has_grafana_admin_password": bool(secrets_map.get("GRAFANA_ADMIN_PASSWORD", "")),
         "grafana_url": urls["grafana_url"],

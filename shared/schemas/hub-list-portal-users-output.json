@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-list-portal-users-output.json",
+  "title": "central-monitoring-hub list-portal-users output",
+  "type": "object",
+  "required": [
+    "customer",
+    "display_name",
+    "customer_portal_enabled",
+    "grafana_login_url",
+    "grafana_org_name",
+    "users"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "customer": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$"
+    },
+    "display_name": { "type": "string" },
+    "customer_portal_enabled": { "type": "boolean" },
+    "grafana_org_id": { "type": ["integer", "null"] },
+    "grafana_login_url": { "type": "string" },
+    "grafana_org_name": { "type": "string" },
+    "users": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "username",
+          "full_name",
+          "email",
+          "role",
+          "disabled",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "username": { "type": "string" },
+          "full_name": { "type": "string" },
+          "email": { "type": "string" },
+          "role": { "type": "string", "enum": ["Viewer", "Editor"] },
+          "disabled": { "type": "boolean" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" }
+        }
+      }
+    }
+  }
+}

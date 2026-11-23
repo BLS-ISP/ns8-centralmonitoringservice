@@ -335,3 +335,161 @@ def test_events_smarthost_user_domain_destroy_and_pull_images(
     del_routes = [c for c in ns8_env.task_calls if c["action"] == "delete-route"]
     assert len(del_routes) == 1
     assert del_routes[0]["data"]["instance"] == "central-monitoring-hub1"
+
+
+def test_v102_ldap_viewer_group_persistence_and_live_grafana_ldap_reload(
+    ns8_env: FakeNS8Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import base64
+
+    execute_script(IMAGEROOT / "actions" / "create-module" / "20initialize")
+
+    reload_calls: list[tuple[str, str, dict[str, str]]] = []
+
+    def spy_pod_http_request(
+        url: str,
+        *,
+        method: str = "GET",
+        data: bytes | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: float = 2.0,
+        **kwargs: Any,
+    ) -> tuple[int, bytes] | None:
+        reload_calls.append((method, url, dict(headers or {})))
+        return 200, b'{"message":"LDAP config reloaded"}'
+
+    import hub_core.pod_http
+
+    monkeypatch.setattr(hub_core.pod_http, "pod_http_request", spy_pod_http_request)
+
+    admin_dn = "CN=Domain Admins,CN=Users,DC=ad,DC=bls-isp,DC=net"
+    editor_dn = "CN=MSP-Engineers,OU=Groups,DC=ad,DC=bls-isp,DC=net"
+    viewer_dn = "CN=MSP-Viewers,OU=Groups,DC=ad,DC=bls-isp,DC=net"
+    admin_pw = "GrafanaAdminPw!102"
+
+    payload = {
+        "host": "monitoring.bls-isp.net",
+        "lets_encrypt": True,
+        "http2https": True,
+        "storage_mode": "local",
+        "ldap_enabled": True,
+        "ldap_domain": "ad.msp.example.com",
+        "ldap_admin_group": admin_dn,
+        "ldap_editor_group": editor_dn,
+        "ldap_viewer_group": viewer_dn,
+        "grafana_admin_password": admin_pw,
+    }
+    validate_against_schema("hub-configure-module-input.json", payload)
+
+    rc_cfg, out_cfg, err_cfg = execute_script(
+        IMAGEROOT / "actions" / "configure-module" / "20configure",
+        payload=payload,
+    )
+    assert rc_cfg == 0, err_cfg
+    validate_against_schema("hub-configure-module-output.json", json.loads(out_cfg))
+    assert ns8_env.persisted_env["LDAP_ADMIN_GROUP"] == admin_dn
+    assert ns8_env.persisted_env["LDAP_EDITOR_GROUP"] == editor_dn
+    assert ns8_env.persisted_env["LDAP_VIEWER_GROUP"] == viewer_dn
+
+    expected_basic = "Basic " + base64.b64encode(f"admin:{admin_pw}".encode("utf-8")).decode("ascii")
+    ldap_reloads = [
+        hdrs
+        for method, url, hdrs in reload_calls
+        if method == "POST" and url == "http://127.0.0.1:3000/api/admin/provisioning/ldap/reload"
+    ]
+    assert len(ldap_reloads) >= 1
+    assert ldap_reloads[-1].get("Authorization") == expected_basic
+
+    rc_read, out_read, err_read = execute_script(
+        IMAGEROOT / "actions" / "get-configuration" / "20read",
+        payload={},
+    )
+    assert rc_read == 0, err_read
+    read_doc = json.loads(out_read)
+    validate_against_schema("hub-get-configuration-output.json", read_doc)
+    assert read_doc["ldap_admin_group"] == admin_dn
+    assert read_doc["ldap_editor_group"] == editor_dn
+    assert read_doc["ldap_viewer_group"] == viewer_dn
+
+    # Also verify user-domain-changed event triggers live Grafana LDAP reload
+    reload_calls.clear()
+    rc_ev, _, err_ev = execute_script(IMAGEROOT / "events" / "user-domain-changed" / "10handler")
+    assert rc_ev == 0, err_ev
+    ev_reloads = [
+        hdrs
+        for method, url, hdrs in reload_calls
+        if method == "POST" and url == "http://127.0.0.1:3000/api/admin/provisioning/ldap/reload"
+    ]
+    assert len(ev_reloads) >= 1
+    assert ev_reloads[-1].get("Authorization") == expected_basic
+
+
+def test_in_place_update_module_upgrades_gateway_image_rerenders_configs_and_restarts_pod(
+    ns8_env: FakeNS8Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    execute_script(IMAGEROOT / "actions" / "create-module" / "20initialize")
+    execute_script(
+        IMAGEROOT / "actions" / "configure-module" / "20configure",
+        payload={
+            "host": "monitoring.bls-isp.net",
+            "lets_encrypt": True,
+            "http2https": True,
+            "storage_mode": "local",
+            "ldap_enabled": True,
+            "ldap_domain": "ad.msp.example.com",
+        },
+    )
+
+    # Simulate pre-existing v1.0.1 state before update-module
+    ns8_env.set_env(
+        "CENTRAL_MONITORING_HUB_GATEWAY_IMAGE",
+        "ghcr.io/bls-isp/central-monitoring-hub-gateway:1.0.1",
+    )
+    ns8_env.unset_env("LDAP_VIEWER_GROUP")
+    ns8_env.dump_env()
+    (ns8_env.config_dir / "grafana" / "grafana.ini").write_bytes(b"[server]\nhttp_port = 3000\n")
+
+    # Simulate newly unpacked v1.0.2 defaults.env
+    (ns8_env.etc_dir / "defaults.env").write_bytes(
+        b"CENTRAL_MONITORING_HUB_GATEWAY_IMAGE=ghcr.io/bls-isp/central-monitoring-hub-gateway:1.0.2\n"
+    )
+    ns8_env.helper_calls.clear()
+    ns8_env.systemctl_state.clear()
+
+    hooks_called: list[str] = []
+    tenancy_pkg = types.ModuleType("hub_tenancy")
+    ldap_mod = types.ModuleType("hub_tenancy.ldap_sync")
+    graf_mod = types.ModuleType("hub_tenancy.grafana_sync")
+    alert_pkg = types.ModuleType("hub_alerting")
+    am_mod = types.ModuleType("hub_alerting.alertmanager_config")
+    ldap_mod.sync_ldap_config = lambda s, e=None: hooks_called.append("ldap_sync")  # type: ignore[attr-defined]
+    graf_mod.sync_all_orgs_if_running = lambda s, e=None: hooks_called.append("grafana_orgs")  # type: ignore[attr-defined]
+    am_mod.render_all_probe_configs = lambda s: hooks_called.append("probe_configs")  # type: ignore[attr-defined]
+    am_mod.sync_alertmanager = lambda s: hooks_called.append("am_sync")  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "hub_tenancy", tenancy_pkg)
+    monkeypatch.setitem(sys.modules, "hub_tenancy.ldap_sync", ldap_mod)
+    monkeypatch.setitem(sys.modules, "hub_tenancy.grafana_sync", graf_mod)
+    monkeypatch.setitem(sys.modules, "hub_alerting", alert_pkg)
+    monkeypatch.setitem(sys.modules, "hub_alerting.alertmanager_config", am_mod)
+
+    rc_pull, _, err_pull = execute_script(IMAGEROOT / "update-module.d" / "20pull_images")
+    assert rc_pull == 0, err_pull
+    assert (
+        ns8_env.persisted_env["CENTRAL_MONITORING_HUB_GATEWAY_IMAGE"]
+        == "ghcr.io/bls-isp/central-monitoring-hub-gateway:1.0.2"
+    )
+    assert ns8_env.persisted_env["LDAP_VIEWER_GROUP"] == ""
+    assert (
+        "podman",
+        "pull",
+        "ghcr.io/bls-isp/central-monitoring-hub-gateway:1.0.2",
+    ) in ns8_env.helper_calls
+
+    rc_upd, _, err_upd = execute_script(IMAGEROOT / "update-module.d" / "50update")
+    assert rc_upd == 0, err_upd
+    updated_ini = (ns8_env.config_dir / "grafana" / "grafana.ini").read_text(encoding="utf-8")
+    assert "[unified_alerting]\nenabled = false" in updated_ini
+    assert {"ldap_sync", "probe_configs", "am_sync", "grafana_orgs"} <= set(hooks_called)
+    assert ns8_env.systemctl_state.get("central-monitoring-hub.service") == "active"
+    assert ns8_env.systemctl_state.get("grafana.service") == "active"
+    assert ns8_env.systemctl_state.get("hub-gateway.service") == "active"

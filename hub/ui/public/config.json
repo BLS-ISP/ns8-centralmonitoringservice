@@ -20,5 +20,5 @@
     "relnotes_url": "https://github.com/BLS-ISP/ns8-centralmonitoringservice/releases"
   },
   "source": "ghcr.io/bls-isp/central-monitoring-hub",
-  "version": "1.0.1"
+  "version": "1.0.2"
 }

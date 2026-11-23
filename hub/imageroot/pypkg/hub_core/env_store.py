@@ -191,6 +191,7 @@ def initialize_default_env(state_dir: str | Path | None = None) -> dict[str, str
         "LDAP_DOMAIN": "",
         "LDAP_ADMIN_GROUP": "Domain Admins",
         "LDAP_EDITOR_GROUP": "",
+        "LDAP_VIEWER_GROUP": "",
     }
     for img_key, img_val in resolve_pinned_images(state_dir).items():
         if not existing.get(img_key):
@@ -273,6 +274,7 @@ def apply_configuration(state_dir: str | Path | None, request: dict[str, Any]) -
     ldap_domain = str(request.get("ldap_domain", "")).strip()
     ldap_admin_group = str(request.get("ldap_admin_group", "Domain Admins")).strip()
     ldap_editor_group = str(request.get("ldap_editor_group", "")).strip()
+    ldap_viewer_group = str(request.get("ldap_viewer_group", "")).strip()
 
     promql_upstream = "http://127.0.0.1:10902" if storage_mode == "s3" else "http://127.0.0.1:9090"
     prom_extra_args = build_prometheus_extra_args(storage_mode, retention_size_gb)
@@ -299,6 +301,7 @@ def apply_configuration(state_dir: str | Path | None, request: dict[str, Any]) -
         "LDAP_DOMAIN": ldap_domain,
         "LDAP_ADMIN_GROUP": ldap_admin_group,
         "LDAP_EDITOR_GROUP": ldap_editor_group,
+        "LDAP_VIEWER_GROUP": ldap_viewer_group,
     }
     existing = read_module_env(sdir)
     for img_key, img_val in resolve_pinned_images(state_dir).items():

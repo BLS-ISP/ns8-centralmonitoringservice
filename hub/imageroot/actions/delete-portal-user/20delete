@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import sys
+
+for _candidate in (
+    Path(__file__).resolve().parents[2] / "pypkg",
+    Path("/imageroot/pypkg"),
+):
+    if _candidate.is_dir() and str(_candidate) not in sys.path:
+        sys.path.append(str(_candidate))
+
+from hub_tenancy.grafana_sync import delete_grafana_portal_user_if_running  # noqa: E402
+from hub_tenancy.store import delete_portal_user, resolve_state_dir  # noqa: E402
+
+
+def _fail_validation(field: str, value: object, error_code: str) -> None:
+    try:
+        import agent  # type: ignore[import-not-found]
+
+        agent.set_status("validation-failed")
+    except ImportError:
+        pass
+    json.dump(
+        [{"field": field, "parameter": field, "value": value, "error": error_code}],
+        sys.stdout,
+    )
+    sys.stdout.write("\n")
+    sys.exit(2)
+
+
+def main() -> None:
+    raw_in = sys.stdin.read().strip()
+    request = json.loads(raw_in) if raw_in else {}
+    state_dir = resolve_state_dir()
+    customer = str(request.get("customer") or "").strip()
+    username = str(request.get("username") or "").strip()
+
+    try:
+        removed, tenant_rec = delete_portal_user(state_dir, customer, username)
+    except ValueError as exc:
+        _fail_validation("username", username, str(exc))
+        return
+
+    if tenant_rec is None:
+        _fail_validation("customer", customer, "tenant_not_found")
+        return
+
+    grafana_synced = delete_grafana_portal_user_if_running(
+        state_dir,
+        os.environ,
+        username,
+        customer=customer,
+    )
+    output = {
+        "status": "deleted",
+        "customer": customer,
+        "username": username,
+        "grafana_synced": bool(grafana_synced),
+        "deleted": bool(removed),
+    }
+    json.dump(output, sys.stdout)
+    sys.stdout.write("\n")
+
+
+if __name__ == "__main__":
+    main()

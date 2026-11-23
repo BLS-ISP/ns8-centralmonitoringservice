@@ -25,6 +25,11 @@ TENANCY_ACTIONS = {
     "delete-tenant": "20delete",
     "rotate-token": "20rotate",
     "generate-agent-bundle": "20generate",
+    "discover-ldap-groups": "20read",
+    "test-ldap-user": "20test",
+    "list-portal-users": "20read",
+    "save-portal-user": "20save",
+    "delete-portal-user": "20delete",
 }
 
 

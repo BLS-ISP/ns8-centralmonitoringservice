@@ -76,12 +76,14 @@ Damit sich Techniker des Systemhauses mit ihrem zentralen NethServer-8-Benutzerk
 1. Stellen Sie sicher, dass auf dem MSP-NS8-Cluster eine Benutzerdomäne unter **Domänen und Benutzer** eingerichtet ist.
 2. Navigieren Sie zu **Central Monitoring Hub -> Einstellungen -> LDAP / Active Directory SSO**:
    - **LDAP-Anmeldung aktivieren (`ldap_enabled`):** `Ein`
-   - **NS8-Benutzerdomäne (`ldap_domain`):** Gewünschte Domäne auswählen (z. B. `ad.msp-beispiel.de`)
-   - **MSP-Admin-Gruppe (`ldap_admin_group`):** z. B. `Domain Admins` oder `monitoring-admins` (erhält Rolle `Admin` in Grafana **Org 1**)
-   - **MSP-Techniker-Gruppe (`ldap_editor_group`):** z. B. `Techniker` oder `monitoring-ops` (erhält Rolle `Editor` in Grafana **Org 1**)
+   - **NS8-Benutzerdomäne (`ldap_domain`):** Gewünschte Domäne auswählen (z. B. `ad.msp-beispiel.de`) und auf **Gruppen aus AD/LDAP laden** (`discover-ldap-groups`) klicken, um vorhandene Verzeichnisgruppen live inkl. vollständigem Distinguished Name (`DN`) abzurufen.
+   - **MSP-Admin-Gruppe (`ldap_admin_group`):** z. B. `CN=Domain Admins,CN=Users,DC=ad,DC=msp-beispiel,DC=de` (erhält Rolle `Admin` in Grafana **Org 1**)
+   - **MSP-Techniker-Gruppe (`ldap_editor_group`):** z. B. `Techniker` / `monitoring-ops` (erhält Rolle `Editor` in Grafana **Org 1**)
+   - **MSP-Read-Only-Gruppe (`ldap_viewer_group`, optional):** z. B. `ServiceDesk-ReadOnly` (erhält Rolle `Viewer` in Grafana **Org 1**)
+   - **Live-Benutzertest (`test-ldap-user`):** Prüfen Sie vor dem Speichern mit einem AD-/LDAP-Benutzernamen die effektive Gruppenauflösung (inkl. verschachtelter Active-Directory-Gruppen über `LDAP_MATCHING_RULE_IN_CHAIN` `1.2.840.113556.1.4.1941` sowie primärer AD-Gruppe) und die resultierende Grafana-Rolle.
 
 > [!NOTE]
-> LDAP-Gruppen-Mappings werden in `/etc/grafana/ldap.toml` hart auf `org_id = 1` (MSP Main Org) gebunden. Wenn sich NS8-LDAP-Proxy-Ports ändern, aktualisiert der Event-Handler `events/user-domain-changed/10handler` die Konfiguration automatisch. Optionale Endkunden-Zugänge nutzen davon strikt getrennte lokale Read-Only-Viewer-Konten in ihrer jeweiligen Kunden-Organisation.
+> LDAP-Gruppen-Mappings werden in `/etc/grafana/ldap.toml` hart auf `org_id = 1` (MSP Main Org) gebunden. Wenn sich NS8-LDAP-Proxy-Ports ändern, aktualisiert der Event-Handler `events/user-domain-changed/10handler` die Konfiguration automatisch. Optionale Endkunden-Zugänge nutzen davon strikt getrennte lokale Konten in ihrer jeweiligen Kunden-Organisation.
 
 ---
 
@@ -112,7 +114,7 @@ flowchart TD
    - **Anzeigename (`display_name`):** `Autohaus Schmidt GmbH`
    - **Standorte (`sites`):** z. B. `hq`, `filiale-sued` (Standard-Standort: `hq`)
    - **Kunden-Kontaktadressen (`contact_emails`, optional):** z. B. `it@autohaus-schmidt.de` für mandantenbezogene E-Mail-Alarme
-   - **Read-Only-Kundenportal (`customer_portal_enabled`, optional):** Bei Bedarf aktivieren und Benutzernamen + starkes Passwort vergeben. Der Kunde kann sich danach direkt unter `https://monitoring.msp-beispiel.de` anmelden und sieht ausschließlich seine eigenen Systeme.
+   - **Kundenportal & Multi-User-Konten (`customer_portal_enabled`, optional):** Bei Bedarf aktivieren. Über die Aktion **Portal-Benutzer verwalten** (`list-portal-users`, `save-portal-user`, `delete-portal-user`) in der Mandantenliste können beliebig viele kundeneigene Grafana-Konten mit Rolle `Viewer` (reiner Lesezugriff) oder `Editor` (eigene Dashboards innerhalb der isolierten Kunden-Org bearbeiten, während Datenquellen, Provisioning und Alerting serverseitig durch `hub-gateway` gesperrt bleiben) angelegt, per Passwort-Generator zurückgesetzt, vorübergehend gesperrt/aktiviert (`disabled`) und per 1-Klick-Zugangsdaten-Kopie geteilt werden.
 2. Kopieren Sie das nach dem Speichern **einmalig eingeblendete Bearer-Token (`cms_v1_...`)** direkt in Ihren Passwort-Tresor.
 
 ### 4.2 Variante A: Kundenstandort MIT eigenem NethServer 8

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NS8 Rule #5: Pull updated container images during update-module (never in systemd)."""
+"""NS8 Rule #5: Sync updated image pins + new env defaults and pull images during update-module."""
 
 from __future__ import annotations
 
@@ -13,15 +13,34 @@ if str(_PYPKG) not in sys.path:
 from hub_core import resolve_pinned_images, resolve_state_dir  # noqa: E402
 from hub_core.env_store import read_module_env  # noqa: E402
 
+BACKFILL_ENV_DEFAULTS = {
+    "LDAP_ENABLED": "false",
+    "LDAP_DOMAIN": "",
+    "LDAP_ADMIN_GROUP": "Domain Admins",
+    "LDAP_EDITOR_GROUP": "",
+    "LDAP_VIEWER_GROUP": "",
+}
+
 
 def main() -> int:
     import agent
 
     state_dir = resolve_state_dir()
-    env = read_module_env(state_dir)
-    for env_key, default_image in resolve_pinned_images(state_dir).items():
-        image_ref = env.get(env_key) or default_image
-        agent.run_helper("podman", "pull", image_ref)
+    existing = read_module_env(state_dir)
+    pinned = resolve_pinned_images(state_dir)
+
+    for env_key, default_image in pinned.items():
+        agent.set_env(env_key, default_image)
+
+    for key, default_val in BACKFILL_ENV_DEFAULTS.items():
+        if key not in existing:
+            agent.set_env(key, default_val)
+
+    # NS8 Rule #2: Flush updated image pins and backfilled defaults before 50update restarts systemd!
+    agent.dump_env()
+
+    for default_image in pinned.values():
+        agent.run_helper("podman", "pull", default_image)
     return 0
 
 

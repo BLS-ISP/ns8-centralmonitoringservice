@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-discover-ldap-groups-output.json",
+  "title": "central-monitoring-hub discover-ldap-groups output",
+  "type": "object",
+  "required": ["ok", "domain", "schema", "base_dn", "groups", "error"],
+  "additionalProperties": false,
+  "properties": {
+    "ok": { "type": "boolean" },
+    "domain": { "type": "string" },
+    "schema": {
+      "type": "string",
+      "description": "Directory schema identifier such as 'ad' or 'rfc2307'."
+    },
+    "base_dn": { "type": "string" },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "dn", "description"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "dn": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "error": { "type": "string" }
+  }
+}

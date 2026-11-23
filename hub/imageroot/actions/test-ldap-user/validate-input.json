@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-test-ldap-user-input.json",
+  "title": "central-monitoring-hub test-ldap-user input",
+  "description": "Queries an NS8 LDAP/AD domain for a username and evaluates Grafana Org 1 Admin/Editor/Viewer group mapping.",
+  "type": "object",
+  "required": ["domain", "username"],
+  "additionalProperties": false,
+  "properties": {
+    "domain": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253
+    },
+    "username": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "ldap_admin_group": {
+      "type": "string",
+      "maxLength": 512,
+      "default": ""
+    },
+    "ldap_editor_group": {
+      "type": "string",
+      "maxLength": 512,
+      "default": ""
+    },
+    "ldap_viewer_group": {
+      "type": "string",
+      "maxLength": 512,
+      "default": ""
+    }
+  }
+}

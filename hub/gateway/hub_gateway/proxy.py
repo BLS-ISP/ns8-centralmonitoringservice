@@ -50,6 +50,9 @@ FORBIDDEN_EXACT_PATHS: Final[frozenset[str]] = frozenset(
         "/ready",
         "/config",
         "/ring",
+        "/api/alertmanager",
+        "/api/ruler",
+        "/api/v1/provisioning",
         "/api/v1/query",
         "/api/v1/query_range",
         "/api/v1/series",
@@ -68,6 +71,9 @@ FORBIDDEN_EXACT_PATHS: Final[frozenset[str]] = frozenset(
 
 FORBIDDEN_PATH_PREFIXES: Final[tuple[str, ...]] = (
     "/alert-relay",
+    "/api/alertmanager/",
+    "/api/ruler/",
+    "/api/v1/provisioning/",
     "/api/v1/label/",
     "/api/v1/status/",
     "/api/v1/admin/",
@@ -174,6 +180,11 @@ def is_forbidden_internal_route(path_or_raw: str, *, method: str = "GET") -> boo
         "/api/datasources/proxy/"
     ):
         if not _is_allowed_datasource_proxy_request(collapsed, method):
+            return True
+    elif collapsed_lower == "/api/datasources" or collapsed_lower.startswith(
+        "/api/datasources/"
+    ):
+        if method.upper() not in ("GET", "HEAD", "OPTIONS"):
             return True
 
     return False

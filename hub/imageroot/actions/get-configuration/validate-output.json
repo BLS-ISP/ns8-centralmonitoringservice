@@ -19,6 +19,7 @@
     "ldap_domain",
     "ldap_admin_group",
     "ldap_editor_group",
+    "ldap_viewer_group",
     "available_ldap_domains",
     "has_grafana_admin_password",
     "grafana_url",
@@ -63,6 +64,7 @@
     "ldap_domain": { "type": "string" },
     "ldap_admin_group": { "type": "string" },
     "ldap_editor_group": { "type": "string" },
+    "ldap_viewer_group": { "type": "string" },
     "available_ldap_domains": {
       "type": "array",
       "items": { "type": "string" }

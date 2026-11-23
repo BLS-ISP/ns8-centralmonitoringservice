@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import sys
+
+for _candidate in (
+    Path(__file__).resolve().parents[2] / "pypkg",
+    Path("/imageroot/pypkg"),
+):
+    if _candidate.is_dir() and str(_candidate) not in sys.path:
+        sys.path.append(str(_candidate))
+
+from hub_tenancy.grafana_sync import sync_all_orgs_if_running  # noqa: E402
+from hub_tenancy.store import (  # noqa: E402
+    build_grafana_org_name,
+    load_tenants_raw,
+    resolve_grafana_login_url,
+    resolve_state_dir,
+    save_portal_user,
+)
+
+
+def _fail_validation(field: str, value: object, error_code: str) -> None:
+    try:
+        import agent  # type: ignore[import-not-found]
+
+        agent.set_status("validation-failed")
+    except ImportError:
+        pass
+    json.dump(
+        [{"field": field, "parameter": field, "value": value, "error": error_code}],
+        sys.stdout,
+    )
+    sys.stdout.write("\n")
+    sys.exit(2)
+
+
+def main() -> None:
+    raw_in = sys.stdin.read().strip()
+    request = json.loads(raw_in) if raw_in else {}
+    state_dir = resolve_state_dir()
+    customer = str(request.get("customer") or "").strip()
+    username = str(request.get("username") or "").strip()
+
+    try:
+        saved_user = save_portal_user(state_dir, request)
+    except KeyError:
+        _fail_validation("customer", customer, "tenant_not_found")
+        return
+    except ValueError as exc:
+        msg = str(exc)
+        err_field = "password" if "password" in msg.lower() else "username"
+        err_val = "" if err_field == "password" else username
+        _fail_validation(err_field, err_val, msg)
+        return
+
+    sync_res = sync_all_orgs_if_running(state_dir, os.environ)
+    refreshed = next(
+        (t for t in load_tenants_raw(state_dir) if t.get("customer") == customer),
+        None,
+    )
+    display_name = str((refreshed or {}).get("display_name") or customer)
+    org_id = (refreshed or {}).get("grafana_org_id")
+
+    output = {
+        "status": "saved",
+        "customer": customer,
+        "grafana_org_id": org_id,
+        "grafana_login_url": resolve_grafana_login_url(state_dir, os.environ),
+        "grafana_org_name": build_grafana_org_name(display_name, customer),
+        "grafana_synced": bool(sync_res.get("synced", False)),
+        "user": saved_user,
+    }
+    json.dump(output, sys.stdout)
+    sys.stdout.write("\n")
+
+
+if __name__ == "__main__":
+    main()

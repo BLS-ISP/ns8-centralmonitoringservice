@@ -23,6 +23,40 @@
       </div>
     </div>
 
+    <!-- Customer Portal Login Explanation & Central Login URL Bar -->
+    <div class="portal-info-bar">
+      <div class="portal-info-bar__header">
+        <div class="portal-info-bar__title">
+          {{ $t("tenants.portal_info_title") }}
+        </div>
+        <div v-if="effectiveGrafanaLoginUrl" class="table-row-actions">
+          <NsButton
+            kind="ghost"
+            size="sm"
+            :icon="Copy16"
+            @click="copyWithFeedback(effectiveGrafanaLoginUrl)"
+          >
+            {{ $t("common.copy") }}
+          </NsButton>
+          <NsButton
+            kind="secondary"
+            size="sm"
+            :icon="Launch20"
+            @click="openExternalUrl(effectiveGrafanaLoginUrl)"
+          >
+            {{ $t("tenants.open_login_page") }}
+          </NsButton>
+        </div>
+      </div>
+      <div class="portal-info-bar__desc">
+        {{ $t("tenants.portal_info_desc") }}
+      </div>
+      <div v-if="effectiveGrafanaLoginUrl" class="mono-text">
+        <strong>{{ $t("tenants.portal_login_url_label") }}:</strong>
+        {{ effectiveGrafanaLoginUrl }}
+      </div>
+    </div>
+
     <!-- One-Time Newly Minted / Rotated Token Banner -->
     <div
       v-if="revealedToken.auth_token"
@@ -154,8 +188,13 @@
                 :kind="row.customer_portal_enabled ? 'green' : 'gray'"
                 :label="
                   row.customer_portal_enabled
-                    ? $t('tenants.portal_enabled_badge', {
-                        user: row.portal_viewer_username,
+                    ? $t('tenants.portal_enabled_accounts_badge', {
+                        count:
+                          row.portal_users_count !== undefined
+                            ? row.portal_users_count
+                            : row.portal_viewer_username
+                            ? 1
+                            : 0,
                       })
                     : $t('tenants.portal_disabled_badge')
                 "
@@ -178,6 +217,14 @@
 
             <cv-data-table-cell>
               <div class="table-row-actions">
+                <NsButton
+                  kind="secondary"
+                  size="sm"
+                  :icon="UserMultiple20"
+                  @click="openPortalUsersModal(row)"
+                >
+                  {{ $t("tenants.portal_users_btn") }}
+                </NsButton>
                 <NsButton
                   kind="secondary"
                   size="sm"
@@ -330,6 +377,326 @@
       <template slot="secondary-button">{{ $t("common.cancel") }}</template>
       <template slot="primary-button">
         {{ isEditing ? $t("common.save") : $t("tenants.create_tenant") }}
+      </template>
+    </NsModal>
+
+    <!-- Multi-User Customer Grafana Account Management Modal -->
+    <NsModal
+      size="large"
+      :visible="showPortalUsersModal"
+      :primary-button-disabled="savingPortalUser || loadingPortalUsers"
+      :isLoading="savingPortalUser"
+      @modal-hidden="closePortalUsersModal"
+      @primary-click="submitSavePortalUser"
+    >
+      <template slot="title">
+        {{
+          $t("tenants.portal_users_modal_title", {
+            customer: portalModal.display_name || portalModal.customer,
+          })
+        }}
+      </template>
+      <template slot="content">
+        <!-- Organization & Login URL Summary -->
+        <div class="endpoint-row mg-bottom-md">
+          <div>
+            <div>
+              <strong>{{ $t("tenants.portal_users_org_label") }}:</strong>
+              {{
+                portalModal.grafana_org_name ||
+                `Customer: ${portalModal.display_name || portalModal.customer} (${portalModal.customer})`
+              }}
+            </div>
+            <div v-if="portalModalLoginUrl">
+              <strong>{{ $t("tenants.portal_login_url_label") }}:</strong>
+              {{ portalModalLoginUrl }}
+            </div>
+          </div>
+          <div v-if="portalModalLoginUrl" class="table-row-actions">
+            <NsButton
+              kind="ghost"
+              size="sm"
+              :icon="Copy16"
+              @click="copySecret(portalModalLoginUrl)"
+            >
+              {{ $t("common.copy") }}
+            </NsButton>
+            <NsButton
+              kind="secondary"
+              size="sm"
+              :icon="Launch20"
+              @click="openExternalUrl(portalModalLoginUrl)"
+            >
+              {{ $t("tenants.open_login_page") }}
+            </NsButton>
+          </div>
+        </div>
+
+        <!-- Warning + 1-Click Activation if Customer Portal is Disabled -->
+        <NsInlineNotification
+          v-if="!loadingPortalUsers && !portalModal.customer_portal_enabled"
+          kind="warning"
+          :title="$t('tenants.portal_disabled_warning_title')"
+          :description="$t('tenants.portal_disabled_warning_desc')"
+          :actionLabel="$t('tenants.enable_portal_now_btn')"
+          :loadingAction="enablingPortalInline"
+          :showCloseButton="false"
+          @action="enablePortalForCurrentTenant"
+          class="mg-bottom-md"
+        />
+
+        <!-- Newly Set Credentials Copy Banner -->
+        <NsInlineNotification
+          v-if="issuedPortalCredentials"
+          kind="success"
+          :title="
+            $t('tenants.portal_credentials_ready_title', {
+              username: issuedPortalCredentials.username,
+            })
+          "
+          :showCloseButton="true"
+          @close="issuedPortalCredentials = null"
+          class="mg-bottom-md"
+        >
+          <template #description>
+            <div>
+              <p class="mg-bottom-sm">
+                {{ $t("tenants.portal_credentials_ready_desc") }}
+              </p>
+              <div class="token-secret-box__code mg-bottom-sm">
+                <pre class="mono-text" style="margin: 0; white-space: pre-wrap">{{
+                  formatCredentialsSummary(issuedPortalCredentials)
+                }}</pre>
+                <NsButton
+                  kind="primary"
+                  size="sm"
+                  :icon="Copy16"
+                  @click="
+                    copySecret(
+                      formatCredentialsSummary(issuedPortalCredentials)
+                    )
+                  "
+                >
+                  {{ $t("tenants.copy_credentials_summary_btn") }}
+                </NsButton>
+              </div>
+            </div>
+          </template>
+        </NsInlineNotification>
+
+        <!-- Existing Accounts List -->
+        <h3 class="form-section-title mg-bottom-sm">
+          {{
+            $t("tenants.portal_existing_accounts_title", {
+              count: portalModal.users.length,
+            })
+          }}
+        </h3>
+
+        <cv-skeleton-text
+          v-if="loadingPortalUsers"
+          :paragraph="true"
+          :line-count="3"
+        />
+        <p
+          v-else-if="!portalModal.users.length"
+          class="form-section-desc mg-bottom-md"
+        >
+          {{ $t("tenants.portal_no_accounts") }}
+        </p>
+        <div v-else class="portal-users-list">
+          <div
+            v-for="usr in portalModal.users"
+            :key="usr.username"
+            class="portal-user-item"
+          >
+            <div class="portal-user-item__meta">
+              <div class="table-row-actions">
+                <strong class="mono-text">{{ usr.username }}</strong>
+                <NsTag
+                  :kind="usr.role === 'Editor' ? 'blue' : 'gray'"
+                  :label="usr.role"
+                />
+                <NsTag
+                  :kind="usr.disabled ? 'red' : 'green'"
+                  :label="
+                    usr.disabled
+                      ? $t('tenants.portal_status_disabled')
+                      : $t('tenants.portal_status_active')
+                  "
+                />
+              </div>
+              <div
+                v-if="usr.full_name || usr.email"
+                class="form-section-desc"
+                style="margin: 0"
+              >
+                {{ usr.full_name }}
+                <span v-if="usr.email">({{ usr.email }})</span>
+              </div>
+            </div>
+
+            <div class="table-row-actions">
+              <NsButton
+                kind="ghost"
+                size="sm"
+                :icon="Edit16"
+                :disabled="savingPortalUser"
+                @click="startEditPortalUser(usr)"
+              >
+                {{ $t("tenants.portal_reset_edit_btn") }}
+              </NsButton>
+              <NsButton
+                v-if="usr.disabled"
+                kind="ghost"
+                size="sm"
+                :icon="Unlocked16"
+                :disabled="savingPortalUser"
+                @click="togglePortalUserDisabled(usr)"
+              >
+                {{ $t("tenants.portal_unlock_btn") }}
+              </NsButton>
+              <NsButton
+                v-else
+                kind="ghost"
+                size="sm"
+                :icon="Locked16"
+                :disabled="savingPortalUser"
+                @click="togglePortalUserDisabled(usr)"
+              >
+                {{ $t("tenants.portal_lock_btn") }}
+              </NsButton>
+              <NsButton
+                kind="danger-ghost"
+                size="sm"
+                :icon="TrashCan16"
+                :disabled="savingPortalUser"
+                @click="submitDeletePortalUser(usr)"
+              >
+                {{ $t("common.delete") }}
+              </NsButton>
+            </div>
+          </div>
+        </div>
+
+        <!-- Create / Edit Customer Account Form -->
+        <div class="form-section-divider">
+          <div class="page-toolbar mg-bottom-sm">
+            <h3 class="form-section-title">
+              {{
+                isEditingPortalUser
+                  ? $t("tenants.portal_form_edit_title", {
+                      username: portalUserForm.username,
+                    })
+                  : $t("tenants.portal_form_create_title")
+              }}
+            </h3>
+            <NsButton
+              v-if="isEditingPortalUser"
+              kind="ghost"
+              size="sm"
+              @click="resetPortalUserForm"
+            >
+              {{ $t("tenants.portal_cancel_edit_btn") }}
+            </NsButton>
+          </div>
+
+          <cv-form @submit.prevent="submitSavePortalUser">
+            <div class="form-grid-2">
+              <NsTextInput
+                v-model.trim="portalUserForm.username"
+                :label="$t('tenants.portal_user_username_label')"
+                :helper-text="$t('tenants.portal_user_username_helper')"
+                placeholder="acme-admin"
+                :disabled="isEditingPortalUser || savingPortalUser"
+                :invalid-message="portalUserErrors.username"
+              />
+              <cv-select
+                v-model="portalUserForm.role"
+                :label="$t('tenants.portal_user_role_label')"
+                :disabled="savingPortalUser"
+              >
+                <cv-select-option value="Viewer">
+                  {{ $t("tenants.portal_role_viewer") }}
+                </cv-select-option>
+                <cv-select-option value="Editor">
+                  {{ $t("tenants.portal_role_editor") }}
+                </cv-select-option>
+              </cv-select>
+            </div>
+
+            <div class="form-grid-2">
+              <NsTextInput
+                v-model.trim="portalUserForm.full_name"
+                :label="$t('tenants.portal_user_fullname_label')"
+                placeholder="Max Mustermann"
+                :disabled="savingPortalUser"
+              />
+              <NsTextInput
+                v-model.trim="portalUserForm.email"
+                :label="$t('tenants.portal_user_email_label')"
+                placeholder="m.mustermann@acme.example.com"
+                :disabled="savingPortalUser"
+                :invalid-message="portalUserErrors.email"
+              />
+            </div>
+
+            <div class="password-gen-row">
+              <div class="password-gen-row__input">
+                <NsTextInput
+                  v-model="portalUserForm.password"
+                  :type="portalPasswordRevealed ? 'text' : 'password'"
+                  :label="$t('tenants.portal_user_password_label')"
+                  :helper-text="
+                    isEditingPortalUser
+                      ? $t('tenants.portal_user_password_edit_helper')
+                      : $t('tenants.portal_user_password_create_helper')
+                  "
+                  :placeholder="
+                    isEditingPortalUser
+                      ? $t('common.unchanged_placeholder')
+                      : $t('tenants.portal_password_placeholder')
+                  "
+                  :disabled="savingPortalUser"
+                  :invalid-message="portalUserErrors.password"
+                />
+              </div>
+              <NsButton
+                kind="secondary"
+                size="field"
+                type="button"
+                :icon="Password16"
+                :disabled="savingPortalUser"
+                @click="generateStrongPortalPassword"
+              >
+                {{ $t("tenants.generate_strong_password_btn") }}
+              </NsButton>
+            </div>
+
+            <NsToggle
+              v-model="portalUserForm.activeToggle"
+              :label="$t('tenants.portal_user_account_status_label')"
+              value="portalUserActive"
+              :disabled="savingPortalUser"
+              class="mg-top-md"
+            >
+              <template slot="text-left">
+                {{ $t("tenants.portal_status_disabled") }}
+              </template>
+              <template slot="text-right">
+                {{ $t("tenants.portal_status_active") }}
+              </template>
+            </NsToggle>
+          </cv-form>
+        </div>
+      </template>
+      <template slot="secondary-button">{{ $t("common.close") }}</template>
+      <template slot="primary-button">
+        {{
+          isEditingPortalUser
+            ? $t("tenants.save_portal_user_btn")
+            : $t("tenants.create_portal_user_btn")
+        }}
       </template>
     </NsModal>
 
@@ -592,7 +959,7 @@
 </template>
 
 <script>
-import { mapState } from "vuex";
+import { mapState, mapActions } from "vuex";
 import {
   TaskService,
   IconService,
@@ -606,11 +973,17 @@ import TrashCan16 from "@carbon/icons-vue/es/trash-can/16";
 import Terminal20 from "@carbon/icons-vue/es/terminal/20";
 import Copy16 from "@carbon/icons-vue/es/copy/16";
 import Download16 from "@carbon/icons-vue/es/download/16";
+import UserMultiple20 from "@carbon/icons-vue/es/user--multiple/20";
+import Launch20 from "@carbon/icons-vue/es/launch/20";
+import Password16 from "@carbon/icons-vue/es/password/16";
+import Locked16 from "@carbon/icons-vue/es/locked/16";
+import Unlocked16 from "@carbon/icons-vue/es/unlocked/16";
 
 const CUSTOMER_SLUG_RE = /^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$/;
 const SITE_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,46}[a-z0-9]$/;
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const PORTAL_USER_RE = /^[a-zA-Z0-9._@-]{3,64}$/;
+const PORTAL_SAVE_USER_RE = /^[a-zA-Z0-9._-]{3,64}$/;
 const COLLECTOR_ID_RE = /^([a-z0-9][a-z0-9._-]{1,62}[a-z0-9])?$/;
 
 export default {
@@ -628,6 +1001,11 @@ export default {
       Terminal20,
       Copy16,
       Download16,
+      UserMultiple20,
+      Launch20,
+      Password16,
+      Locked16,
+      Unlocked16,
       loading: false,
       tableError: "",
       tenants: [],
@@ -665,6 +1043,33 @@ export default {
         portal_viewer_password: "",
         notes: "",
       },
+      showPortalUsersModal: false,
+      loadingPortalUsers: false,
+      savingPortalUser: false,
+      enablingPortalInline: false,
+      isEditingPortalUser: false,
+      portalPasswordRevealed: false,
+      portalTenantRow: null,
+      portalModal: {
+        customer: "",
+        display_name: "",
+        customer_portal_enabled: false,
+        grafana_org_id: null,
+        grafana_org_name: "",
+        grafana_login_url: "",
+        users: [],
+      },
+      portalUserErrors: {},
+      portalUserForm: {
+        username: "",
+        full_name: "",
+        email: "",
+        role: "Viewer",
+        activeToggle: true,
+        password: "",
+      },
+      pendingPlainPassword: "",
+      issuedPortalCredentials: null,
       showRotateModal: false,
       rotatingToken: false,
       rotateValidationError: "",
@@ -695,11 +1100,25 @@ export default {
     };
   },
   computed: {
-    ...mapState(["instanceName", "appName", "core"]),
+    ...mapState(["instanceName", "appName", "core", "grafanaUrl"]),
     i18nTableColumns() {
       return this.tableColumns.map((col) =>
         this.$t(`tenants.columns.${col}`)
       );
+    },
+    effectiveGrafanaLoginUrl() {
+      const fromTenant = this.tenants.find((t) => t.grafana_login_url);
+      if (fromTenant && fromTenant.grafana_login_url) {
+        return fromTenant.grafana_login_url;
+      }
+      if (this.grafanaUrl) {
+        const clean = this.grafanaUrl.replace(/\/+$/, "");
+        return clean.endsWith("/login") ? clean : `${clean}/login`;
+      }
+      return "";
+    },
+    portalModalLoginUrl() {
+      return this.portalModal.grafana_login_url || this.effectiveGrafanaLoginUrl;
     },
   },
   watch: {
@@ -708,13 +1127,22 @@ export default {
       handler(val) {
         if (val && this.core) {
           this.loadTenants();
+          if (!this.grafanaUrl) {
+            this.loadOverviewUrl();
+          }
         }
       },
     },
   },
   methods: {
+    ...mapActions(["setGrafanaUrlInStore"]),
     clearFeedback() {
       this.feedbackBanner = { kind: "success", title: "", description: "" };
+    },
+    openExternalUrl(url) {
+      if (url) {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
     },
     dismissRevealedToken() {
       this.revealedToken = {
@@ -737,6 +1165,14 @@ export default {
       }
       this.tokenCopied = true;
     },
+    async copyWithFeedback(text) {
+      await this.copySecret(text);
+      this.feedbackBanner = {
+        kind: "success",
+        title: this.$t("common.copied_to_clipboard"),
+        description: text,
+      };
+    },
     downloadTextFile(filename, content) {
       const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
       const url = URL.createObjectURL(blob);
@@ -747,6 +1183,32 @@ export default {
       anchor.click();
       document.body.removeChild(anchor);
       URL.revokeObjectURL(url);
+    },
+    async loadOverviewUrl() {
+      const taskAction = "get-overview";
+      const eventId = this.getUuid();
+
+      (this.core && this.core.$root ? this.core.$root : this.$root).$once(
+        `${taskAction}-completed-${eventId}`,
+        (ctx, res) => {
+          const out = (res && res.output) || {};
+          if (out.grafana_url) {
+            this.setGrafanaUrlInStore(out.grafana_url);
+          }
+        }
+      );
+
+      await this.to(
+        this.createModuleTaskForApp(this.instanceName, {
+          action: taskAction,
+          data: {},
+          extra: {
+            title: this.$t("action.get-overview"),
+            isNotificationHidden: true,
+            eventId,
+          },
+        })
+      );
     },
     async loadTenants() {
       this.loading = true;
@@ -865,16 +1327,14 @@ export default {
       if (emails.some((em) => !EMAIL_RE.test(em))) {
         errors.contact_emails = this.$t("tenants.validation_emails");
       }
-      if (this.form.customer_portal_enabled) {
-        if (!PORTAL_USER_RE.test(this.form.portal_viewer_username.trim())) {
+      const viewerUser = this.form.portal_viewer_username.trim();
+      if (this.form.customer_portal_enabled && viewerUser) {
+        if (!PORTAL_USER_RE.test(viewerUser)) {
           errors.portal_viewer_username = this.$t(
             "tenants.validation_portal_username"
           );
         }
-        if (
-          !this.isEditing &&
-          this.form.portal_viewer_password.length < 10
-        ) {
+        if (!this.isEditing && this.form.portal_viewer_password.length < 10) {
           errors.portal_viewer_password = this.$t(
             "tenants.validation_portal_password"
           );
@@ -998,6 +1458,413 @@ export default {
       }
       this.loadTenants();
     },
+
+    // --- Multi-User Customer Portal Account Manager ---
+    openPortalUsersModal(row) {
+      this.portalTenantRow = row;
+      this.issuedPortalCredentials = null;
+      this.resetPortalUserForm();
+      this.portalModal = {
+        customer: row.customer,
+        display_name: row.display_name || row.customer,
+        customer_portal_enabled: Boolean(row.customer_portal_enabled),
+        grafana_org_id: row.grafana_org_id || null,
+        grafana_org_name: row.grafana_org_name || "",
+        grafana_login_url: row.grafana_login_url || "",
+        users: [],
+      };
+      this.showPortalUsersModal = true;
+      this.loadPortalUsers(row.customer);
+    },
+    closePortalUsersModal() {
+      this.showPortalUsersModal = false;
+      this.pendingPlainPassword = "";
+    },
+    resetPortalUserForm() {
+      this.isEditingPortalUser = false;
+      this.portalPasswordRevealed = false;
+      this.portalUserErrors = {};
+      this.portalUserForm = {
+        username: "",
+        full_name: "",
+        email: "",
+        role: "Viewer",
+        activeToggle: true,
+        password: "",
+      };
+    },
+    startEditPortalUser(usr) {
+      this.isEditingPortalUser = true;
+      this.portalPasswordRevealed = false;
+      this.portalUserErrors = {};
+      this.portalUserForm = {
+        username: usr.username,
+        full_name: usr.full_name || "",
+        email: usr.email || "",
+        role: usr.role === "Editor" ? "Editor" : "Viewer",
+        activeToggle: !usr.disabled,
+        password: "",
+      };
+    },
+    generateStrongPortalPassword() {
+      const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+      const lower = "abcdefghijkmnopqrstuvwxyz";
+      const digits = "23456789";
+      const symbols = "!@#$%&*-_";
+      const all = upper + lower + digits + symbols;
+      const rand = new Uint32Array(16);
+      if (
+        typeof globalThis !== "undefined" &&
+        globalThis.crypto &&
+        typeof globalThis.crypto.getRandomValues === "function"
+      ) {
+        globalThis.crypto.getRandomValues(rand);
+      } else {
+        for (let i = 0; i < rand.length; i += 1) {
+          rand[i] = Math.floor(Math.random() * 0xffffffff);
+        }
+      }
+      const chars = [
+        upper[rand[0] % upper.length],
+        lower[rand[1] % lower.length],
+        digits[rand[2] % digits.length],
+        symbols[rand[3] % symbols.length],
+      ];
+      for (let i = 4; i < 16; i += 1) {
+        chars.push(all[rand[i] % all.length]);
+      }
+      for (let i = chars.length - 1; i > 0; i -= 1) {
+        const j = rand[i] % (i + 1);
+        const tmp = chars[i];
+        chars[i] = chars[j];
+        chars[j] = tmp;
+      }
+      this.portalUserForm.password = chars.join("");
+      this.portalPasswordRevealed = true;
+    },
+    formatCredentialsSummary(cred) {
+      return this.$t("tenants.credentials_summary_template", {
+        url: cred.url || "-",
+        org: cred.org || "-",
+        username: cred.username,
+        role: cred.role,
+        password: cred.password,
+      });
+    },
+    async loadPortalUsers(customerSlug) {
+      this.loadingPortalUsers = true;
+      const taskAction = "list-portal-users";
+      const eventId = this.getUuid();
+
+      (this.core && this.core.$root ? this.core.$root : this.$root).$once(
+        `${taskAction}-aborted-${eventId}`,
+        this.loadPortalUsersAborted
+      );
+      (this.core && this.core.$root ? this.core.$root : this.$root).$once(
+        `${taskAction}-completed-${eventId}`,
+        this.loadPortalUsersCompleted
+      );
+
+      const res = await this.to(
+        this.createModuleTaskForApp(this.instanceName, {
+          action: taskAction,
+          data: { customer: customerSlug },
+          extra: {
+            title: this.$t("action.list-portal-users"),
+            isNotificationHidden: true,
+            eventId,
+          },
+        })
+      );
+      const err = res[0];
+      if (err) {
+        this.loadingPortalUsers = false;
+        this.createErrorNotificationForApp(
+          err,
+          this.$t("task.cannot_create_task")
+        );
+      }
+    },
+    loadPortalUsersAborted(taskError, taskContext) {
+      console.error(`${taskContext.action} aborted`, taskError);
+      this.loadingPortalUsers = false;
+      this.createErrorNotificationForApp(
+        taskError,
+        this.$t("tenants.portal_users_load_failed")
+      );
+    },
+    loadPortalUsersCompleted(taskContext, taskResult) {
+      this.loadingPortalUsers = false;
+      const out = (taskResult && taskResult.output) || {};
+      this.portalModal = {
+        customer: out.customer || this.portalModal.customer,
+        display_name: out.display_name || this.portalModal.display_name,
+        customer_portal_enabled: Boolean(out.customer_portal_enabled),
+        grafana_org_id:
+          out.grafana_org_id !== undefined ? out.grafana_org_id : null,
+        grafana_org_name: out.grafana_org_name || "",
+        grafana_login_url: out.grafana_login_url || "",
+        users: Array.isArray(out.users) ? out.users : [],
+      };
+    },
+    async enablePortalForCurrentTenant() {
+      const row =
+        this.tenants.find((t) => t.customer === this.portalModal.customer) ||
+        this.portalTenantRow;
+      if (!row) {
+        return;
+      }
+      this.enablingPortalInline = true;
+      const payload = {
+        customer: row.customer,
+        display_name: row.display_name || row.customer,
+        sites: Array.isArray(row.sites) && row.sites.length ? row.sites : ["hq"],
+        contact_emails: Array.isArray(row.contact_emails)
+          ? row.contact_emails
+          : [],
+        customer_portal_enabled: true,
+        portal_viewer_username: row.portal_viewer_username || "",
+        portal_viewer_password: "",
+        notes: row.notes || "",
+      };
+      const taskAction = "save-tenant";
+      const eventId = this.getUuid();
+
+      (this.core && this.core.$root ? this.core.$root : this.$root).$once(
+        `${taskAction}-aborted-${eventId}`,
+        (taskError) => {
+          this.enablingPortalInline = false;
+          this.createErrorNotificationForApp(
+            taskError,
+            this.$t("tenants.save_failed")
+          );
+        }
+      );
+      (this.core && this.core.$root ? this.core.$root : this.$root).$once(
+        `${taskAction}-completed-${eventId}`,
+        () => {
+          this.enablingPortalInline = false;
+          this.loadPortalUsers(row.customer);
+          this.loadTenants();
+        }
+      );
+
+      const res = await this.to(
+        this.createModuleTaskForApp(this.instanceName, {
+          action: taskAction,
+          data: payload,
+          extra: {
+            title: this.$t("action.save-tenant"),
+            description: payload.display_name,
+            eventId,
+          },
+        })
+      );
+      const err = res[0];
+      if (err) {
+        this.enablingPortalInline = false;
+        this.createErrorNotificationForApp(
+          err,
+          this.$t("task.cannot_create_task")
+        );
+      }
+    },
+    validatePortalUserForm() {
+      const errors = {};
+      const username = (this.portalUserForm.username || "").trim();
+      if (!PORTAL_SAVE_USER_RE.test(username)) {
+        errors.username = this.$t("tenants.validation_portal_user_username");
+      }
+      const email = (this.portalUserForm.email || "").trim();
+      if (email && !EMAIL_RE.test(email)) {
+        errors.email = this.$t("tenants.validation_portal_user_email");
+      }
+      const pwd = this.portalUserForm.password || "";
+      if (!this.isEditingPortalUser && pwd.length < 10) {
+        errors.password = this.$t("tenants.validation_portal_user_password");
+      } else if (this.isEditingPortalUser && pwd.length > 0 && pwd.length < 10) {
+        errors.password = this.$t("tenants.validation_portal_user_password");
+      }
+      this.portalUserErrors = errors;
+      return Object.keys(errors).length === 0;
+    },
+    async submitSavePortalUser() {
+      if (!this.validatePortalUserForm()) {
+        return;
+      }
+      const pwd = this.portalUserForm.password || "";
+      const passwordUnchanged = Boolean(
+        this.isEditingPortalUser && pwd.length === 0
+      );
+      this.pendingPlainPassword = pwd;
+      const payload = {
+        customer: this.portalModal.customer,
+        username: this.portalUserForm.username.trim(),
+        full_name: (this.portalUserForm.full_name || "").trim(),
+        email: (this.portalUserForm.email || "").trim(),
+        role: this.portalUserForm.role === "Editor" ? "Editor" : "Viewer",
+        disabled: !this.portalUserForm.activeToggle,
+        password: pwd,
+        password_unchanged: passwordUnchanged,
+      };
+      await this.dispatchSavePortalUser(payload);
+    },
+    async togglePortalUserDisabled(usr) {
+      this.pendingPlainPassword = "";
+      const payload = {
+        customer: this.portalModal.customer,
+        username: usr.username,
+        full_name: usr.full_name || "",
+        email: usr.email || "",
+        role: usr.role === "Editor" ? "Editor" : "Viewer",
+        disabled: !usr.disabled,
+        password: "",
+        password_unchanged: true,
+      };
+      await this.dispatchSavePortalUser(payload);
+    },
+    async dispatchSavePortalUser(payload) {
+      this.savingPortalUser = true;
+      const taskAction = "save-portal-user";
+      const eventId = this.getUuid();
+
+      (this.core && this.core.$root ? this.core.$root : this.$root).$once(
+        `${taskAction}-aborted-${eventId}`,
+        this.savePortalUserAborted
+      );
+      (this.core && this.core.$root ? this.core.$root : this.$root).$once(
+        `${taskAction}-validation-failed-${eventId}`,
+        this.savePortalUserValidationFailed
+      );
+      (this.core && this.core.$root ? this.core.$root : this.$root).$once(
+        `${taskAction}-completed-${eventId}`,
+        this.savePortalUserCompleted
+      );
+
+      const res = await this.to(
+        this.createModuleTaskForApp(this.instanceName, {
+          action: taskAction,
+          data: payload,
+          extra: {
+            title: this.$t("action.save-portal-user"),
+            description: payload.username,
+            eventId,
+          },
+        })
+      );
+      const err = res[0];
+      if (err) {
+        this.savingPortalUser = false;
+        this.pendingPlainPassword = "";
+        this.createErrorNotificationForApp(
+          err,
+          this.$t("task.cannot_create_task")
+        );
+      }
+    },
+    savePortalUserAborted(taskError, taskContext) {
+      console.error(`${taskContext.action} aborted`, taskError);
+      this.savingPortalUser = false;
+      this.pendingPlainPassword = "";
+      this.createErrorNotificationForApp(
+        taskError,
+        this.$t("tenants.portal_user_save_failed")
+      );
+    },
+    savePortalUserValidationFailed(validationErrors) {
+      this.savingPortalUser = false;
+      this.pendingPlainPassword = "";
+      const mapped = {};
+      const errList = Array.isArray(validationErrors)
+        ? validationErrors
+        : validationErrors && Array.isArray(validationErrors.output)
+        ? validationErrors.output
+        : [];
+      errList.forEach((item) => {
+        const key = item.field || item.parameter || "username";
+        mapped[key] = this.$te(`validation.${item.error}`)
+          ? this.$t(`validation.${item.error}`)
+          : item.error;
+      });
+      this.portalUserErrors = mapped;
+    },
+    savePortalUserCompleted(taskContext, taskResult) {
+      this.savingPortalUser = false;
+      const out = (taskResult && taskResult.output) || {};
+      const savedUser = out.user || {};
+      if (this.pendingPlainPassword) {
+        this.issuedPortalCredentials = {
+          url: out.grafana_login_url || this.portalModalLoginUrl,
+          org:
+            out.grafana_org_name ||
+            this.portalModal.grafana_org_name ||
+            `Customer: ${this.portalModal.display_name} (${this.portalModal.customer})`,
+          username: savedUser.username || this.portalUserForm.username,
+          role: savedUser.role || this.portalUserForm.role,
+          password: this.pendingPlainPassword,
+        };
+      }
+      this.pendingPlainPassword = "";
+      this.resetPortalUserForm();
+      this.loadPortalUsers(this.portalModal.customer);
+      this.loadTenants();
+    },
+    async submitDeletePortalUser(usr) {
+      this.savingPortalUser = true;
+      const payload = {
+        customer: this.portalModal.customer,
+        username: usr.username,
+      };
+      const taskAction = "delete-portal-user";
+      const eventId = this.getUuid();
+
+      (this.core && this.core.$root ? this.core.$root : this.$root).$once(
+        `${taskAction}-aborted-${eventId}`,
+        (taskError, taskContext) => {
+          console.error(`${taskContext.action} aborted`, taskError);
+          this.savingPortalUser = false;
+          this.createErrorNotificationForApp(
+            taskError,
+            this.$t("tenants.portal_user_delete_failed")
+          );
+        }
+      );
+      (this.core && this.core.$root ? this.core.$root : this.$root).$once(
+        `${taskAction}-completed-${eventId}`,
+        () => {
+          this.savingPortalUser = false;
+          if (
+            this.isEditingPortalUser &&
+            this.portalUserForm.username === usr.username
+          ) {
+            this.resetPortalUserForm();
+          }
+          this.loadPortalUsers(this.portalModal.customer);
+          this.loadTenants();
+        }
+      );
+
+      const res = await this.to(
+        this.createModuleTaskForApp(this.instanceName, {
+          action: taskAction,
+          data: payload,
+          extra: {
+            title: this.$t("action.delete-portal-user"),
+            description: usr.username,
+            eventId,
+          },
+        })
+      );
+      const err = res[0];
+      if (err) {
+        this.savingPortalUser = false;
+        this.createErrorNotificationForApp(
+          err,
+          this.$t("task.cannot_create_task")
+        );
+      }
+    },
+
     openRotateModal(row) {
       this.rotateValidationError = "";
       this.rotateForm = {

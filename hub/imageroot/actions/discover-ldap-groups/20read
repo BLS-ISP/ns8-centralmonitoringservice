@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import sys
+
+for _candidate in (
+    Path(__file__).resolve().parents[2] / "pypkg",
+    Path("/imageroot/pypkg"),
+):
+    if _candidate.is_dir() and str(_candidate) not in sys.path:
+        sys.path.append(str(_candidate))
+
+from hub_tenancy.ldap_client import discover_domain_groups  # noqa: E402
+
+
+def main() -> None:
+    raw_in = sys.stdin.read().strip()
+    request = json.loads(raw_in) if raw_in else {}
+    domain = str(request.get("domain") or "").strip()
+
+    output = discover_domain_groups(domain)
+    json.dump(output, sys.stdout)
+    sys.stdout.write("\n")
+
+
+if __name__ == "__main__":
+    main()

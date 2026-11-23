@@ -139,8 +139,10 @@ tests/
   - `:10902` (HTTP), `:10901` (gRPC) -> `thanos-query` (`storage_mode == "s3"`)
   - `:10912` (HTTP), `:10911` (gRPC) -> `thanos-sidecar` (`storage_mode == "s3"`)
   - `:10922` (HTTP), `:10921` (gRPC) -> `thanos-store` (`storage_mode == "s3"`)
-- **Readiness, Systemd `%E` Specifier & Image Pull Rules:**
-  - Every `systemd/user/*.service` unit **MUST** reference NS8 config/state paths via `%E/` (`~/.config`, matching `AGENT_INSTALL_DIR=~/.config` and `AGENT_STATE_DIR=~/.config/state`), **NEVER** `%S/` (`~/.local/state`), and pass `--user 0:0` on rootless containers reading `0600` host bind-mounted configs/secrets.
+- **Readiness, Systemd `%E` Specifier, Directory Bind-Mounts & Python 3.9 Compatibility:**
+  - All Python modules and NS8 action scripts inside `hub/imageroot/` and `hub/gateway/` **MUST** start with `from __future__ import annotations` and remain 100% compatible with Rocky Linux 9's system **Python 3.9** (zero PEP 701 nested/backslash f-strings, zero `@dataclass(slots=True)`, zero `write_text(..., newline=...)`, zero `datetime.UTC`).
+  - Every `systemd/user/*.service` unit **MUST** reference NS8 config/state paths via `%E/` (`~/.config`, matching `AGENT_INSTALL_DIR=~/.config` and `AGENT_STATE_DIR=~/.config/state`), **NEVER** `%S/` (`~/.local/state`), mount **parent directories** with SELinux `:z` / `:ro,z` labels (never single-file bind mounts that pin stale inodes across `os.replace`), and pass `--user 0:0` on rootless containers reading `0600` host bind-mounted configs/secrets.
+  - `configure-module` and `get-configuration` persist and expose `ldap_admin_group`, `ldap_editor_group`, and `ldap_viewer_group` (up to 512 chars each for full AD Distinguished Names).
   - Every container unit **MUST** use `--pull=missing` and `--restart=on-failure` (NS8 Rule #5: **NEVER** `--pull=always`).
   - `grafana.service`, `hub-gateway.service`, and `thanos-sidecar.service` include `ExecStartPre` readiness loops (`--entrypoint=python3 /wait-pod-endpoints ...`) polling `http://127.0.0.1:9090/-/ready` and `http://127.0.0.1:3100/ready` (bounded timeout 60s) plus backend HTTP connection retries with exponential backoff (NS8 Rule #6).
 

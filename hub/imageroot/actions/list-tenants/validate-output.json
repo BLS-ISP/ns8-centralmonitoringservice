@@ -20,6 +20,7 @@
           "customer_portal_enabled",
           "grafana_org_id",
           "portal_viewer_username",
+          "portal_users_count",
           "notes",
           "created_at",
           "updated_at"
@@ -50,7 +51,10 @@
           "previous_token_expires_at": { "type": ["string", "null"] },
           "customer_portal_enabled": { "type": "boolean" },
           "grafana_org_id": { "type": ["integer", "null"] },
+          "grafana_org_name": { "type": "string" },
+          "grafana_login_url": { "type": "string" },
           "portal_viewer_username": { "type": "string" },
+          "portal_users_count": { "type": "integer", "minimum": 0 },
           "last_ingest_at": { "type": ["string", "null"] },
           "notes": { "type": "string" },
           "created_at": { "type": "string" },

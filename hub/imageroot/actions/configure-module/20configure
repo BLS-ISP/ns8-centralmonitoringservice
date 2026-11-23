@@ -19,6 +19,7 @@ from hub_core.env_store import (  # noqa: E402
     build_urls,
     discover_smarthost,
 )
+from hub_core.pod_http import reload_grafana_ldap_if_running  # noqa: E402
 
 
 def main() -> int:
@@ -74,6 +75,8 @@ def main() -> int:
         sync_ldap_config(state_dir, env)
     except ImportError:
         pass
+
+    reload_grafana_ldap_if_running(state_dir, env)
 
     try:
         from hub_alerting.alertmanager_config import render_all_probe_configs

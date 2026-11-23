@@ -69,9 +69,9 @@ def _load_schema(filename: str) -> dict[str, Any]:
     return json.loads((SCHEMAS_DIR / filename).read_text(encoding="utf-8"))
 
 
-def test_all_47_shared_schemas_are_self_contained_draft07() -> None:
+def test_all_57_shared_schemas_are_self_contained_draft07() -> None:
     schema_files = sorted(SCHEMAS_DIR.glob("*.json"))
-    assert len(schema_files) == 47
+    assert len(schema_files) == 57
 
     for path in schema_files:
         assert "get-status" not in path.name, f"Forbidden get-status override: {path.name}"
@@ -149,6 +149,218 @@ def test_schema_positive_and_negative_abuse_cases() -> None:
     for bad_silence_id in ("../admin", "abc/def", "id?foo=1", "a b c d"):
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate({"silence_id": bad_silence_id}, del_silence_in)
+
+
+def test_v102_ldap_discovery_tester_and_multi_user_portal_schemas() -> None:
+    hub_cfg_in = _load_schema("hub-configure-module-input.json")
+    long_ad_dn = (
+        "CN=MSP Central Monitoring ReadOnly Operations Group,"
+        "OU=Role Based Access Control Groups,OU=Managed Services,"
+        "DC=corp,DC=ad,DC=bls-isp,DC=net"
+    )
+    jsonschema.validate(
+        {
+            "host": "monitoring.bls-isp.net",
+            "lets_encrypt": True,
+            "http2https": True,
+            "storage_mode": "local",
+            "ldap_enabled": True,
+            "ldap_domain": "ad.bls-isp.net",
+            "ldap_admin_group": "CN=Domain Admins,CN=Users,DC=ad,DC=bls-isp,DC=net",
+            "ldap_editor_group": "MSP Engineers",
+            "ldap_viewer_group": long_ad_dn,
+        },
+        hub_cfg_in,
+    )
+
+    disc_in = _load_schema("hub-discover-ldap-groups-input.json")
+    disc_out = _load_schema("hub-discover-ldap-groups-output.json")
+    jsonschema.validate({"domain": "ad.bls-isp.net"}, disc_in)
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({"domain": ""}, disc_in)
+    jsonschema.validate(
+        {
+            "ok": True,
+            "domain": "ad.bls-isp.net",
+            "schema": "ad",
+            "base_dn": "DC=ad,DC=bls-isp,DC=net",
+            "groups": [
+                {
+                    "name": "Domain Admins",
+                    "dn": "CN=Domain Admins,CN=Users,DC=ad,DC=bls-isp,DC=net",
+                    "description": "Designated administrators of the domain",
+                }
+            ],
+            "error": "",
+        },
+        disc_out,
+    )
+
+    test_ldap_in = _load_schema("hub-test-ldap-user-input.json")
+    test_ldap_out = _load_schema("hub-test-ldap-user-output.json")
+    jsonschema.validate(
+        {
+            "domain": "ad.bls-isp.net",
+            "username": "jdoe",
+            "ldap_admin_group": "Domain Admins",
+            "ldap_editor_group": "MSP Engineers",
+            "ldap_viewer_group": long_ad_dn,
+        },
+        test_ldap_in,
+    )
+    jsonschema.validate(
+        {
+            "ok": True,
+            "found": True,
+            "username": "jdoe",
+            "user_dn": "CN=Jane Doe,OU=Staff,DC=ad,DC=bls-isp,DC=net",
+            "display_name": "Jane Doe",
+            "email": "jdoe@bls-isp.net",
+            "member_of": [long_ad_dn],
+            "matched_role": "Viewer",
+            "grafana_admin": False,
+            "message": "Matched Viewer role via ldap_viewer_group",
+        },
+        test_ldap_out,
+    )
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(
+            {
+                "ok": True,
+                "found": True,
+                "username": "jdoe",
+                "user_dn": "CN=Jane Doe,DC=ad,DC=bls-isp,DC=net",
+                "display_name": "Jane Doe",
+                "email": "jdoe@bls-isp.net",
+                "member_of": [],
+                "matched_role": "SuperAdmin",
+                "grafana_admin": True,
+                "message": "Invalid enum",
+            },
+            test_ldap_out,
+        )
+
+    # Tenant saving with customer_portal_enabled=True and empty portal_viewer_username (multi-user flow)
+    save_tenant_in = _load_schema("hub-save-tenant-input.json")
+    jsonschema.validate(
+        {
+            "customer": "acme-corp",
+            "display_name": "ACME Corp GmbH",
+            "sites": ["hq"],
+            "customer_portal_enabled": True,
+            "portal_viewer_username": "",
+            "portal_viewer_password": "",
+        },
+        save_tenant_in,
+    )
+
+    list_tenants_out = _load_schema("hub-list-tenants-output.json")
+    jsonschema.validate(
+        {
+            "tenants": [
+                {
+                    "customer": "acme-corp",
+                    "display_name": "ACME Corp GmbH",
+                    "sites": ["hq"],
+                    "contact_emails": [],
+                    "token_prefix": "cms_v1_abcd...",
+                    "token_created_at": "2026-11-23T10:00:00Z",
+                    "customer_portal_enabled": True,
+                    "grafana_org_id": 2,
+                    "grafana_org_name": "Customer: ACME Corp GmbH (acme-corp)",
+                    "grafana_login_url": "https://monitoring.bls-isp.net/login",
+                    "portal_viewer_username": "acme-ops",
+                    "portal_users_count": 2,
+                    "notes": "",
+                    "created_at": "2026-11-23T10:00:00Z",
+                    "updated_at": "2026-11-23T10:05:00Z",
+                }
+            ],
+            "pagination": {"page": 1, "page_size": 100, "total_items": 1, "total_pages": 1},
+        },
+        list_tenants_out,
+    )
+
+    list_pu_in = _load_schema("hub-list-portal-users-input.json")
+    list_pu_out = _load_schema("hub-list-portal-users-output.json")
+    save_pu_in = _load_schema("hub-save-portal-user-input.json")
+    save_pu_out = _load_schema("hub-save-portal-user-output.json")
+    del_pu_in = _load_schema("hub-delete-portal-user-input.json")
+    del_pu_out = _load_schema("hub-delete-portal-user-output.json")
+
+    jsonschema.validate({"customer": "acme-corp"}, list_pu_in)
+    user_obj = {
+        "username": "acme.cto",
+        "full_name": "ACME CTO",
+        "email": "cto@acme.de",
+        "role": "Editor",
+        "disabled": False,
+        "created_at": "2026-11-23T10:00:00Z",
+        "updated_at": "2026-11-23T10:05:00Z",
+    }
+    jsonschema.validate(
+        {
+            "customer": "acme-corp",
+            "display_name": "ACME Corp GmbH",
+            "customer_portal_enabled": True,
+            "grafana_login_url": "https://monitoring.bls-isp.net/login",
+            "grafana_org_name": "Customer: ACME Corp GmbH (acme-corp)",
+            "users": [user_obj],
+        },
+        list_pu_out,
+    )
+
+    # Create user requires >= 10 char password when password_unchanged is omitted/false
+    jsonschema.validate(
+        {
+            "customer": "acme-corp",
+            "username": "acme.cto",
+            "full_name": "ACME CTO",
+            "email": "cto@acme.de",
+            "role": "Editor",
+            "disabled": False,
+            "password": "VerySecurePortalPassword!",
+            "password_unchanged": False,
+        },
+        save_pu_in,
+    )
+    # Edit user with password_unchanged=True allows empty password
+    jsonschema.validate(
+        {
+            "customer": "acme-corp",
+            "username": "acme.cto",
+            "role": "Viewer",
+            "password": "",
+            "password_unchanged": True,
+        },
+        save_pu_in,
+    )
+    # Reject missing/short password on create, Admin role escalation, or invalid username chars
+    for bad_pu in (
+        {"customer": "acme-corp", "username": "acme.cto", "role": "Viewer", "password": "short"},
+        {"customer": "acme-corp", "username": "acme.cto", "role": "Viewer", "password": "", "password_unchanged": False},
+        {"customer": "acme-corp", "username": "acme.cto", "role": "Admin", "password": "VerySecurePortalPassword!"},
+        {"customer": "acme-corp", "username": "bad space", "role": "Viewer", "password": "VerySecurePortalPassword!"},
+    ):
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(bad_pu, save_pu_in)
+
+    jsonschema.validate(
+        {
+            "status": "saved",
+            "customer": "acme-corp",
+            "grafana_login_url": "https://monitoring.bls-isp.net/login",
+            "grafana_org_name": "Customer: ACME Corp GmbH (acme-corp)",
+            "grafana_synced": True,
+            "user": user_obj,
+        },
+        save_pu_out,
+    )
+    jsonschema.validate({"customer": "acme-corp", "username": "acme.cto"}, del_pu_in)
+    jsonschema.validate(
+        {"status": "deleted", "customer": "acme-corp", "username": "acme.cto", "grafana_synced": True},
+        del_pu_out,
+    )
 
 
 def test_snmp_v3_roundtrip_metadata_in_hub_and_collector_list_targets_outputs() -> None:

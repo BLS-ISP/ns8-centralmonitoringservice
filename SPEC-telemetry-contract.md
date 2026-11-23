@@ -40,8 +40,8 @@ Define the single, immutable data, API, schema, alerting, and dashboard contract
 ## Commands
 
 ```powershell
-# Validate all 47 Draft-07 JSON Schemas in shared/schemas/
-python -c "import glob, json, jsonschema; files = sorted(glob.glob('shared/schemas/*.json')); assert len(files) >= 47; [jsonschema.Draft7Validator.check_schema(json.load(open(f, encoding='utf-8'))) for f in files]; print('Validated', len(files), 'schemas')"
+# Validate all 57 Draft-07 JSON Schemas in shared/schemas/
+python -c "import glob, json, jsonschema; files = sorted(glob.glob('shared/schemas/*.json')); assert len(files) >= 57; [jsonschema.Draft7Validator.check_schema(json.load(open(f, encoding='utf-8'))) for f in files]; print('Validated', len(files), 'schemas')"
 
 # Validate all Grafana Dashboard JSON files (schemaVersion >= 39, UIDs prometheus/loki, LF endings)
 python -c "import glob, json; [json.load(open(f, encoding='utf-8')) for f in sorted(glob.glob('shared/dashboards/*.json'))]; print('Dashboards JSON valid')"
@@ -65,9 +65,9 @@ docker run --rm --entrypoint promtool -v "${PWD}/shared/rules:/rules:ro" quay.io
 .gitignore                             -> Excludes node_modules, dist, __pycache__, .pytest_cache, .env, scratch
 shared/
   schemas/
-    telemetry-contract.schema.json     -> Canonical label regexes, device_role enum, token format, API error envelope
-    hub-*-input.json                   -> 17 self-contained Draft-07 NS8 action input schemas for central-monitoring-hub
-    hub-*-output.json                  -> 17 self-contained Draft-07 NS8 action output schemas for central-monitoring-hub
+    telemetry-contract.schema.json     -> Canonical label regexes, device_role & snmpModule enums, token format, API error envelope
+    hub-*-input.json                   -> 22 self-contained Draft-07 NS8 action input schemas for central-monitoring-hub
+    hub-*-output.json                  -> 22 self-contained Draft-07 NS8 action output schemas for central-monitoring-hub
     collector-*-input.json             -> 6 self-contained Draft-07 NS8 action input schemas for central-monitoring-collector
     collector-*-output.json            -> 6 self-contained Draft-07 NS8 action output schemas for central-monitoring-collector
   rules/

@@ -26,6 +26,7 @@ def main() -> None:
         search=str(request.get("search") or ""),
         page=int(request.get("page") or 1),
         page_size=int(request.get("page_size") or 100),
+        env=os.environ,
     )
     json.dump(output, sys.stdout)
     sys.stdout.write("\n")

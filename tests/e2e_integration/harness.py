@@ -14,7 +14,9 @@ import re
 import shutil
 import socket
 import ssl
+import struct
 import sys
+import threading
 from typing import Any
 
 import aiohttp
@@ -58,6 +60,16 @@ from hub_gateway.prom_remote_write import (  # noqa: E402
     parse_write_request,
 )
 from hub_gateway.snappy_codec import snappy_decompress  # noqa: E402
+from hub_tenancy.ldap_client import (  # noqa: E402
+    AD_IN_CHAIN_OID,
+    PAGED_RESULTS_OID,
+    _ber_bool,
+    _ber_int,
+    _ber_octet_string,
+    _ber_seq,
+    _decode_ber_int,
+    _decode_ber_tlv,
+)
 
 
 def validate_schema(schema_filename: str, payload: Any) -> None:
@@ -169,10 +181,18 @@ class MockGrafanaState:
         self.folders: dict[int, dict[str, dict[str, Any]]] = {1: {}}
         self.dashboards: dict[int, dict[str, dict[str, Any]]] = {1: {}}
         self.users: dict[int, dict[str, Any]] = {
-            1: {"id": 1, "login": "admin", "email": "admin@localhost", "isDisabled": False}
+            1: {
+                "id": 1,
+                "login": "admin",
+                "email": "admin@localhost",
+                "isDisabled": False,
+                "isGrafanaAdmin": True,
+            }
         }
         # org_id -> {user_id -> role}
         self.org_members: dict[int, dict[int, str]] = {1: {1: "Admin"}}
+        self.deleted_user_ids: set[int] = set()
+        self.ldap_reloads: int = 0
         self.ds_proxy_hits: list[tuple[str, str]] = []
 
 
@@ -509,9 +529,9 @@ class LiveObservabilityBackends:
             return web.json_response({"status": "success", "uid": uid})
 
         async def lookup_user(req: web.Request) -> web.Response:
-            login = req.query.get("loginOrEmail", "")
+            login = req.query.get("loginOrEmail", "").strip().lower()
             for u in state.users.values():
-                if u["login"] == login or u["email"] == login:
+                if u["login"].lower() == login or str(u.get("email") or "").lower() == login:
                     return web.json_response(u)
             return web.json_response({"message": "User not found"}, status=404)
 
@@ -526,6 +546,7 @@ class LiveObservabilityBackends:
                 "name": body.get("name", ""),
                 "password": body.get("password", ""),
                 "isDisabled": False,
+                "isGrafanaAdmin": False,
             }
             state.users[uid] = user_rec
             # Faithfully simulate Grafana's auto_assign_org=true adding new users to Org 1
@@ -533,6 +554,30 @@ class LiveObservabilityBackends:
             if isinstance(body.get("OrgId"), int):
                 state.org_members.setdefault(int(body["OrgId"]), {})[uid] = "Viewer"
             return web.json_response({"id": uid, "message": "User created"})
+
+        async def update_user(req: web.Request) -> web.Response:
+            uid = int(req.match_info["uid"])
+            body = await req.json()
+            if uid in state.users:
+                if "name" in body:
+                    state.users[uid]["name"] = body["name"]
+                if "email" in body:
+                    state.users[uid]["email"] = body["email"]
+            return web.json_response({"message": "User updated"})
+
+        async def admin_delete_user(req: web.Request) -> web.Response:
+            uid = int(req.match_info["uid"])
+            if uid not in state.users:
+                return web.json_response({"message": "User not found"}, status=404)
+            del state.users[uid]
+            for members in state.org_members.values():
+                members.pop(uid, None)
+            state.deleted_user_ids.add(uid)
+            return web.json_response({"message": "User deleted"})
+
+        async def admin_reload_ldap(_req: web.Request) -> web.Response:
+            state.ldap_reloads += 1
+            return web.json_response({"message": "LDAP config reloaded"})
 
         async def admin_toggle_user(req: web.Request) -> web.Response:
             uid = int(req.match_info["uid"])
@@ -566,8 +611,8 @@ class LiveObservabilityBackends:
         async def add_org_user(req: web.Request) -> web.Response:
             oid = int(req.match_info["oid"])
             body = await req.json()
-            login = body["loginOrEmail"]
-            user = next((u for u in state.users.values() if u["login"] == login), None)
+            login = body["loginOrEmail"].strip().lower()
+            user = next((u for u in state.users.values() if u["login"].lower() == login), None)
             if user is None:
                 return web.json_response({"message": "User not found"}, status=404)
             state.org_members.setdefault(oid, {})[user["id"]] = body["role"]
@@ -624,9 +669,12 @@ class LiveObservabilityBackends:
         app.router.add_post("/api/folders", create_folder)
         app.router.add_post("/api/dashboards/db", upsert_dashboard)
         app.router.add_get("/api/users/lookup", lookup_user)
+        app.router.add_put("/api/users/{uid:[0-9]+}", update_user)
         app.router.add_post("/api/admin/users", admin_create_user)
+        app.router.add_delete("/api/admin/users/{uid:[0-9]+}", admin_delete_user)
         app.router.add_post("/api/admin/users/{uid:[0-9]+}/{toggle:(?:enable|disable)}", admin_toggle_user)
         app.router.add_put("/api/admin/users/{uid:[0-9]+}/password", admin_set_password)
+        app.router.add_post("/api/admin/provisioning/ldap/reload", admin_reload_ldap)
         app.router.add_post("/api/users/{uid:[0-9]+}/using/{oid:[0-9]+}", switch_user_org)
         return app
 
@@ -906,13 +954,16 @@ def run(agent_id: str, action: str, data: dict[str, Any] | None = None, **_kwarg
 
 _FAKE_AGENT_LDAPPROXY_PY = '''from __future__ import annotations
 
+import json
+import os
+from pathlib import Path
 from typing import Any
 
 
 class Ldapproxy:
-    DOMAINS: dict[str, dict[str, Any]] = {
+    DEFAULT_DOMAINS: dict[str, dict[str, Any]] = {
         "ad.msp.example.com": {
-            "host": "10.0.2.2",
+            "host": "127.0.0.1",
             "port": "20001",
             "schema": "ad",
             "base_dn": "DC=ad,DC=msp,DC=example,DC=com",
@@ -922,13 +973,26 @@ class Ldapproxy:
         }
     }
 
+    def _domains(self) -> dict[str, dict[str, Any]]:
+        merged = {k: dict(v) for k, v in self.DEFAULT_DOMAINS.items()}
+        meta_path = os.environ.get("E2E_FAKE_AGENT_META", "")
+        if meta_path and Path(meta_path).is_file():
+            meta = json.loads(Path(meta_path).read_text(encoding="utf-8"))
+            custom = meta.get("ldap_domains")
+            if isinstance(custom, dict):
+                for dom_name, dom_cfg in custom.items():
+                    if isinstance(dom_cfg, dict):
+                        merged[str(dom_name)] = dict(dom_cfg)
+        return merged
+
     def get_domains_list(self) -> list[str]:
-        return sorted(self.DOMAINS.keys())
+        return sorted(self._domains().keys())
 
     def get_domain(self, name: str) -> dict[str, Any]:
-        if name not in self.DOMAINS:
+        domains = self._domains()
+        if name not in domains:
             raise KeyError(f"Unknown LDAP domain: {name}")
-        return dict(self.DOMAINS[name])
+        return dict(domains[name])
 '''
 
 
@@ -1049,6 +1113,11 @@ class NS8ModuleInstance:
     def set_routes_in_use(self, domains: list[str]) -> None:
         meta = self.read_meta()
         meta["routes_in_use"] = list(domains)
+        self.meta_file.write_bytes((json.dumps(meta, indent=2) + "\n").encode("utf-8"))
+
+    def set_ldap_domain(self, domain: str, info: dict[str, Any]) -> None:
+        meta = self.read_meta()
+        meta.setdefault("ldap_domains", {})[str(domain)] = dict(info)
         self.meta_file.write_bytes((json.dumps(meta, indent=2) + "\n").encode("utf-8"))
 
     def _build_subprocess_env(
@@ -1199,3 +1268,347 @@ def parse_prom_textfile_to_timeseries(
             )
         )
     return series
+
+
+def build_ad_object_sid(rid: int) -> bytes:
+    """Build a valid binary Windows/Samba4 objectSid ending with 32-bit little-endian `rid`."""
+    header = bytes([1, 5, 0, 0, 0, 0, 0, 5])
+    subs = struct.pack("<IIIII", 21, 11111111, 22222222, 33333333, rid)
+    return header + subs
+
+
+class LiveBERLDAPv3Server:
+    """Real local TCP RFC 4511 ASN.1 BER LDAPv3 server for E2E NS8 AD/LDAP actions."""
+
+    def __init__(
+        self,
+        *,
+        expected_bind_dn: str = "",
+        expected_bind_pw: str = "",
+        entries: list[dict[str, Any]] | None = None,
+        max_page_size: int = 2,
+        emit_referral: bool = True,
+    ) -> None:
+        self.expected_bind_dn = expected_bind_dn
+        self.expected_bind_pw = expected_bind_pw
+        self.entries = list(entries or [])
+        self.max_page_size = max_page_size
+        self.emit_referral = emit_referral
+        self.bind_count = 0
+        self.unbind_count = 0
+        self.recorded_filters: list[Any] = []
+        self._sock: socket.socket | None = None
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self.port = 0
+
+    def start(self) -> None:
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(8)
+        srv.settimeout(0.2)
+        self._sock = srv
+        self.port = int(srv.getsockname()[1])
+        self._thread = threading.Thread(target=self._accept_loop, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+
+    def _accept_loop(self) -> None:
+        assert self._sock is not None
+        while not self._stop.is_set():
+            try:
+                conn, _ = self._sock.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            worker = threading.Thread(target=self._handle_client, args=(conn,), daemon=True)
+            worker.start()
+
+    def _recv_exact(self, conn: socket.socket, n: int) -> bytes | None:
+        buf = bytearray()
+        while len(buf) < n:
+            try:
+                chunk = conn.recv(n - len(buf))
+            except OSError:
+                return None
+            if not chunk:
+                return None
+            buf.extend(chunk)
+        return bytes(buf)
+
+    def _recv_ber_msg(self, conn: socket.socket) -> bytes | None:
+        hdr = self._recv_exact(conn, 2)
+        if not hdr or hdr[0] != 0x30:
+            return None
+        first_len = hdr[1]
+        if first_len < 0x80:
+            body_len = first_len
+            extra = b""
+        else:
+            n_oct = first_len & 0x7F
+            extra_raw = self._recv_exact(conn, n_oct)
+            if extra_raw is None:
+                return None
+            extra = extra_raw
+            body_len = int.from_bytes(extra, "big", signed=False)
+        body = self._recv_exact(conn, body_len)
+        if body is None:
+            return None
+        return hdr + extra + body
+
+    def _parse_ber_filter(self, buf: bytes, offset: int = 0) -> tuple[Any, int]:
+        tag, body, next_pos = _decode_ber_tlv(buf, offset)
+        if tag == 0xA0:
+            items = []
+            pos = 0
+            while pos < len(body):
+                sub, pos = self._parse_ber_filter(body, pos)
+                items.append(sub)
+            return ("and", items), next_pos
+        if tag == 0xA1:
+            items = []
+            pos = 0
+            while pos < len(body):
+                sub, pos = self._parse_ber_filter(body, pos)
+                items.append(sub)
+            return ("or", items), next_pos
+        if tag == 0xA2:
+            sub, _ = self._parse_ber_filter(body, 0)
+            return ("not", sub), next_pos
+        if tag == 0xA3:
+            _, attr_b, pos = _decode_ber_tlv(body, 0)
+            _, val_b, _ = _decode_ber_tlv(body, pos)
+            return ("eq", attr_b.decode("utf-8"), val_b.decode("utf-8", errors="replace")), next_pos
+        if tag == 0x87:
+            return ("present", body.decode("utf-8")), next_pos
+        if tag == 0xA9:
+            rule = ""
+            attr = ""
+            val = ""
+            pos = 0
+            while pos < len(body):
+                ft, fb, pos = _decode_ber_tlv(body, pos)
+                if ft == 0x81:
+                    rule = fb.decode("utf-8")
+                elif ft == 0x82:
+                    attr = fb.decode("utf-8")
+                elif ft == 0x83:
+                    val = fb.decode("utf-8", errors="replace")
+            return ("ext", attr, rule, val), next_pos
+        raise ValueError(f"Unsupported BER filter tag 0x{tag:02x}")
+
+    def _get_entry_vals(self, entry: dict[str, Any], attr: str) -> list[str]:
+        alow = attr.lower()
+        if alow == "distinguishedname":
+            return [entry["dn"]]
+        for k, v in entry.get("attrs", {}).items():
+            if k.lower() == alow:
+                if isinstance(v, list):
+                    return [str(x) for x in v if not isinstance(x, bytes)]
+                if not isinstance(v, bytes):
+                    return [str(v)]
+        return []
+
+    def _is_member_in_chain(self, group_dn: str, target_dn: str, visited: set[str]) -> bool:
+        glow = group_dn.lower()
+        if glow in visited:
+            return False
+        visited.add(glow)
+        grp = next((e for e in self.entries if e["dn"].lower() == glow), None)
+        if grp is None:
+            return False
+        members = [m.lower() for m in self._get_entry_vals(grp, "member")]
+        if target_dn.lower() in members:
+            return True
+        for child_dn in members:
+            if self._is_member_in_chain(child_dn, target_dn, visited):
+                return True
+        return False
+
+    def _eval_filter(self, ast_node: Any, entry: dict[str, Any]) -> bool:
+        kind = ast_node[0]
+        if kind == "and":
+            return all(self._eval_filter(c, entry) for c in ast_node[1])
+        if kind == "or":
+            return any(self._eval_filter(c, entry) for c in ast_node[1])
+        if kind == "not":
+            return not self._eval_filter(ast_node[1], entry)
+        if kind == "present":
+            return len(self._get_entry_vals(entry, ast_node[1])) > 0
+        if kind == "eq":
+            _, attr, val = ast_node
+            vlow = val.lower()
+            return any(item.lower() == vlow for item in self._get_entry_vals(entry, attr))
+        if kind == "ext":
+            _, attr, rule, val = ast_node
+            if attr.lower() == "member" and rule == AD_IN_CHAIN_OID:
+                return self._is_member_in_chain(entry["dn"], val, set())
+            return False
+        return False
+
+    def _decode_req_paged_cookie(self, controls_body: bytes | None) -> tuple[bool, int, bytes]:
+        if not controls_body:
+            return False, 0, b""
+        pos = 0
+        while pos < len(controls_body):
+            ct, cb, pos = _decode_ber_tlv(controls_body, pos)
+            if ct != 0x30:
+                continue
+            _, oid_b, ip = _decode_ber_tlv(cb, 0)
+            if oid_b.decode("ascii", errors="replace") != PAGED_RESULTS_OID:
+                continue
+            val_b = b""
+            while ip < len(cb):
+                ft, fb, ip = _decode_ber_tlv(cb, ip)
+                if ft == 0x04:
+                    val_b = fb
+            _, sb, _ = _decode_ber_tlv(val_b, 0)
+            _, sz_b, sp = _decode_ber_tlv(sb, 0)
+            _, ck_b, _ = _decode_ber_tlv(sb, sp)
+            return True, _decode_ber_int(sz_b), ck_b
+        return False, 0, b""
+
+    def _encode_entry_msg(self, msg_id: int, entry: dict[str, Any]) -> bytes:
+        part_attrs: list[bytes] = []
+        for k, raw_v in entry.get("attrs", {}).items():
+            vals = raw_v if isinstance(raw_v, list) else [raw_v]
+            enc_vals = [
+                _ber_octet_string(v if isinstance(v, bytes) else str(v).encode("utf-8"))
+                for v in vals
+            ]
+            part_attrs.append(
+                _ber_seq(
+                    [
+                        _ber_octet_string(k.encode("utf-8")),
+                        _ber_seq(enc_vals, tag=0x31),
+                    ]
+                )
+            )
+        op = _ber_seq(
+            [
+                _ber_octet_string(entry["dn"].encode("utf-8")),
+                _ber_seq(part_attrs),
+            ],
+            tag=0x64,
+        )
+        return _ber_seq([_ber_int(msg_id), op])
+
+    def _handle_client(self, conn: socket.socket) -> None:
+        conn.settimeout(2.0)
+        try:
+            while not self._stop.is_set():
+                pkt = self._recv_ber_msg(conn)
+                if pkt is None:
+                    break
+                _, msg_body, _ = _decode_ber_tlv(pkt, 0)
+                _, id_b, pos = _decode_ber_tlv(msg_body, 0)
+                msg_id = _decode_ber_int(id_b)
+                op_tag, op_body, pos = _decode_ber_tlv(msg_body, pos)
+                controls_body: bytes | None = None
+                if pos < len(msg_body):
+                    ct, cb, _ = _decode_ber_tlv(msg_body, pos)
+                    if ct == 0xA0:
+                        controls_body = cb
+
+                if op_tag == 0x60:
+                    self.bind_count += 1
+                    _, ver_b, bp = _decode_ber_tlv(op_body, 0)
+                    assert _decode_ber_int(ver_b) == 3
+                    _, dn_b, bp = _decode_ber_tlv(op_body, bp)
+                    _, pw_b, _ = _decode_ber_tlv(op_body, bp)
+                    dn_s = dn_b.decode("utf-8")
+                    pw_s = pw_b.decode("utf-8")
+                    if self.expected_bind_dn and (
+                        dn_s != self.expected_bind_dn or pw_s != self.expected_bind_pw
+                    ):
+                        res = _ber_seq(
+                            [
+                                _ber_int(49, tag=0x0A),
+                                _ber_octet_string(b""),
+                                _ber_octet_string(b"Invalid credentials"),
+                            ],
+                            tag=0x61,
+                        )
+                    else:
+                        res = _ber_seq(
+                            [
+                                _ber_int(0, tag=0x0A),
+                                _ber_octet_string(b""),
+                                _ber_octet_string(b""),
+                            ],
+                            tag=0x61,
+                        )
+                    conn.sendall(_ber_seq([_ber_int(msg_id), res]))
+
+                elif op_tag == 0x63:
+                    _, _base_b, sp = _decode_ber_tlv(op_body, 0)
+                    _, _scope_b, sp = _decode_ber_tlv(op_body, sp)
+                    _, _deref_b, sp = _decode_ber_tlv(op_body, sp)
+                    _, _size_b, sp = _decode_ber_tlv(op_body, sp)
+                    _, _time_b, sp = _decode_ber_tlv(op_body, sp)
+                    _, _types_b, sp = _decode_ber_tlv(op_body, sp)
+                    filter_ast, _ = self._parse_ber_filter(op_body, sp)
+                    self.recorded_filters.append(filter_ast)
+
+                    matched = [e for e in self.entries if self._eval_filter(filter_ast, e)]
+                    has_pg, req_pg_size, cookie = self._decode_req_paged_cookie(controls_body)
+                    start_idx = int(cookie.decode("ascii")) if cookie else 0
+                    eff_page = min(req_pg_size or self.max_page_size, self.max_page_size)
+                    sliced = matched[start_idx : start_idx + eff_page] if has_pg else matched
+                    next_idx = start_idx + len(sliced)
+                    next_cookie = (
+                        str(next_idx).encode("ascii")
+                        if (has_pg and next_idx < len(matched))
+                        else b""
+                    )
+
+                    for item in sliced:
+                        conn.sendall(self._encode_entry_msg(msg_id, item))
+
+                    if self.emit_referral and start_idx == 0:
+                        ref_op = _ber_seq(
+                            [_ber_octet_string(b"ldap://ForestDnsZones.ad.bls-isp.net/DC=ad")],
+                            tag=0x73,
+                        )
+                        conn.sendall(_ber_seq([_ber_int(msg_id), ref_op]))
+
+                    done_op = _ber_seq(
+                        [
+                            _ber_int(0, tag=0x0A),
+                            _ber_octet_string(b""),
+                            _ber_octet_string(b""),
+                        ],
+                        tag=0x65,
+                    )
+                    done_items = [_ber_int(msg_id), done_op]
+                    if has_pg:
+                        cval = _ber_seq([_ber_int(len(matched)), _ber_octet_string(next_cookie)])
+                        ctrl = _ber_seq(
+                            [
+                                _ber_octet_string(PAGED_RESULTS_OID.encode("ascii")),
+                                _ber_bool(False),
+                                _ber_octet_string(cval),
+                            ]
+                        )
+                        done_items.append(_ber_seq([ctrl], tag=0xA0))
+                    conn.sendall(_ber_seq(done_items))
+
+                elif op_tag == 0x42:
+                    self.unbind_count += 1
+                    break
+        finally:
+            try:
+                conn.close()
+            except OSError:
+                pass

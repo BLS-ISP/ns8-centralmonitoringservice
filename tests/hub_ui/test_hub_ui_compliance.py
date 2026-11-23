@@ -28,11 +28,16 @@ ALL_HUB_ACTIONS = (
     "configure-module",
     "get-configuration",
     "get-overview",
+    "discover-ldap-groups",
+    "test-ldap-user",
     "list-tenants",
     "save-tenant",
     "delete-tenant",
     "rotate-token",
     "generate-agent-bundle",
+    "list-portal-users",
+    "save-portal-user",
+    "delete-portal-user",
     "list-targets",
     "save-target",
     "delete-target",
@@ -421,9 +426,24 @@ def test_all_17_hub_actions_invoked_across_views() -> None:
                 },
                 "ldap_enabled": True,
                 "ldap_domain": "ad.msp.example.com",
-                "ldap_admin_group": "Domain Admins",
-                "ldap_editor_group": "MSP Technicians",
+                "ldap_admin_group": "CN=Domain Admins,CN=Users,DC=ad,DC=msp,DC=example,DC=com",
+                "ldap_editor_group": "CN=MSP Technicians,CN=Users,DC=ad,DC=msp,DC=example,DC=com",
+                "ldap_viewer_group": "CN=MSP Viewers,CN=Users,DC=ad,DC=msp,DC=example,DC=com",
                 "grafana_admin_password": "StrongAdminPassword123!",
+            },
+        ),
+        (
+            "hub-discover-ldap-groups-input.json",
+            {"domain": "ad.bls-isp.net"},
+        ),
+        (
+            "hub-test-ldap-user-input.json",
+            {
+                "domain": "ad.bls-isp.net",
+                "username": "Genera",
+                "ldap_admin_group": "CN=Domain Admins,CN=Users,DC=ad,DC=bls-isp,DC=net",
+                "ldap_editor_group": "",
+                "ldap_viewer_group": "",
             },
         ),
         (
@@ -438,10 +458,44 @@ def test_all_17_hub_actions_invoked_across_views() -> None:
                 "sites": ["hq", "branch-berlin"],
                 "contact_emails": ["it@acme.example.com"],
                 "customer_portal_enabled": True,
-                "portal_viewer_username": "acme-viewer",
-                "portal_viewer_password": "SecureViewerPassword99",
+                "portal_viewer_username": "",
+                "portal_viewer_password": "",
                 "notes": "24x7 SLA customer",
             },
+        ),
+        (
+            "hub-list-portal-users-input.json",
+            {"customer": "acme-corp"},
+        ),
+        (
+            "hub-save-portal-user-input.json",
+            {
+                "customer": "acme-corp",
+                "username": "acme-admin",
+                "full_name": "Max Mustermann",
+                "email": "m.mustermann@acme.example.com",
+                "role": "Editor",
+                "disabled": False,
+                "password": "StrongPortalPassword123!",
+                "password_unchanged": False,
+            },
+        ),
+        (
+            "hub-save-portal-user-input.json",
+            {
+                "customer": "acme-corp",
+                "username": "acme-admin",
+                "full_name": "Max Mustermann",
+                "email": "m.mustermann@acme.example.com",
+                "role": "Viewer",
+                "disabled": True,
+                "password": "",
+                "password_unchanged": True,
+            },
+        ),
+        (
+            "hub-delete-portal-user-input.json",
+            {"customer": "acme-corp", "username": "acme-admin"},
         ),
         (
             "hub-delete-tenant-input.json",
@@ -759,4 +813,110 @@ def test_extended_snmp_qnap_printer_and_roles_in_ui() -> None:
             "comment": "Printer firmware update window",
         },
         schema=silence_schema,
+    )
+
+
+def test_v102_settings_ldap_discovery_viewer_role_and_user_tester() -> None:
+    """Verify v1.0.2 AD/LDAP live group discovery, Org-1-Viewer mapping, and interactive user tester."""
+    settings_src = (HUB_SRC_ROOT / "views" / "Settings.vue").read_text(encoding="utf-8")
+    assert '"discover-ldap-groups"' in settings_src
+    assert '"test-ldap-user"' in settings_src
+    assert "ldap_viewer_group" in settings_src
+    assert "manualLdapDnMode" in settings_src
+    assert "normalizeGroupSelectionWithDiscovered" in settings_src
+    assert "member_of" in settings_src
+    assert "matched_role" in settings_src
+
+    en_data = json.loads((HUB_UI_ROOT / "public" / "i18n" / "en" / "translation.json").read_text(encoding="utf-8"))
+    de_data = json.loads((HUB_UI_ROOT / "public" / "i18n" / "de" / "translation.json").read_text(encoding="utf-8"))
+    en_helper = en_data["settings"]["ldap_editor_group_helper"]
+    de_helper = de_data["settings"]["ldap_editor_group_helper"]
+    assert "denied" in en_helper.lower()
+    assert "abgewiesen" in de_helper.lower()
+
+    discover_out_schema = _load_schema("hub-discover-ldap-groups-output.json")
+    jsonschema.validate(
+        instance={
+            "ok": True,
+            "domain": "ad.bls-isp.net",
+            "schema": "ad",
+            "base_dn": "DC=ad,DC=bls-isp,DC=net",
+            "groups": [
+                {
+                    "name": "Domain Admins",
+                    "dn": "CN=Domain Admins,CN=Users,DC=ad,DC=bls-isp,DC=net",
+                    "description": "Designated administrators of the domain",
+                }
+            ],
+            "error": "",
+        },
+        schema=discover_out_schema,
+    )
+
+    test_user_out_schema = _load_schema("hub-test-ldap-user-output.json")
+    jsonschema.validate(
+        instance={
+            "ok": True,
+            "found": True,
+            "username": "Genera",
+            "user_dn": "CN=Genera,CN=Users,DC=ad,DC=bls-isp,DC=net",
+            "display_name": "Genera Admin",
+            "email": "genera@bls-isp.net",
+            "member_of": ["CN=Domain Admins,CN=Users,DC=ad,DC=bls-isp,DC=net"],
+            "matched_role": "Admin",
+            "grafana_admin": True,
+            "message": "Matched Org 1 Admin group.",
+        },
+        schema=test_user_out_schema,
+    )
+
+
+def test_v102_tenants_portal_explanation_and_multi_user_manager() -> None:
+    """Verify v1.0.2 Customer Portal explanation bar, portal_users_count, and multi-user modal."""
+    tenants_src = (HUB_SRC_ROOT / "views" / "Tenants.vue").read_text(encoding="utf-8")
+    for required_token in (
+        '"list-portal-users"',
+        '"save-portal-user"',
+        '"delete-portal-user"',
+        "portal_users_count",
+        "grafana_login_url",
+        "grafana_org_name",
+        "generateStrongPortalPassword",
+        "getRandomValues",
+        "copy_credentials_summary_btn",
+        "password_unchanged",
+    ):
+        assert required_token in tenants_src, f"Tenants.vue missing {required_token}"
+
+    list_users_out_schema = _load_schema("hub-list-portal-users-output.json")
+    jsonschema.validate(
+        instance={
+            "customer": "acme-corp",
+            "display_name": "ACME Corp",
+            "customer_portal_enabled": True,
+            "grafana_org_id": 4,
+            "grafana_login_url": "https://monitoring.msp.example.com/login",
+            "grafana_org_name": "Customer: ACME Corp (acme-corp)",
+            "users": [
+                {
+                    "username": "acme-ceo",
+                    "full_name": "Erika Musterfrau",
+                    "email": "erika@acme.example.com",
+                    "role": "Viewer",
+                    "disabled": False,
+                    "created_at": "2026-11-23T10:00:00Z",
+                    "updated_at": "2026-11-23T10:00:00Z",
+                },
+                {
+                    "username": "acme-devops",
+                    "full_name": "Max Mustermann",
+                    "email": "max@acme.example.com",
+                    "role": "Editor",
+                    "disabled": False,
+                    "created_at": "2026-11-23T10:05:00Z",
+                    "updated_at": "2026-11-23T10:05:00Z",
+                },
+            ],
+        },
+        schema=list_users_out_schema,
     )

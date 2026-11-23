@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-test-ldap-user-output.json",
+  "title": "central-monitoring-hub test-ldap-user output",
+  "type": "object",
+  "required": [
+    "ok",
+    "found",
+    "username",
+    "user_dn",
+    "display_name",
+    "email",
+    "member_of",
+    "matched_role",
+    "grafana_admin",
+    "message"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "ok": { "type": "boolean" },
+    "found": { "type": "boolean" },
+    "username": { "type": "string" },
+    "user_dn": { "type": "string" },
+    "display_name": { "type": "string" },
+    "email": { "type": "string" },
+    "member_of": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "matched_role": {
+      "type": "string",
+      "enum": ["Admin", "Editor", "Viewer", "None"]
+    },
+    "grafana_admin": { "type": "boolean" },
+    "message": { "type": "string" }
+  }
+}

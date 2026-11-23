@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-discover-ldap-groups-input.json",
+  "title": "central-monitoring-hub discover-ldap-groups input",
+  "description": "Queries an NS8 LDAP/Active Directory user domain via agent.ldapproxy to list directory groups (short CN and full Distinguished Name).",
+  "type": "object",
+  "required": ["domain"],
+  "additionalProperties": false,
+  "properties": {
+    "domain": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "description": "NS8 user domain name discovered via Ldapproxy (e.g. ad.bls-isp.net)."
+    }
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nethserver.org/schemas/central-monitoring/hub-save-portal-user-input.json",
+  "title": "central-monitoring-hub save-portal-user input",
+  "description": "Creates or updates an isolated Grafana Customer Organization portal user account (Viewer or Editor) with global username uniqueness.",
+  "type": "object",
+  "required": ["customer", "username", "role"],
+  "additionalProperties": false,
+  "properties": {
+    "customer": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$",
+      "minLength": 3,
+      "maxLength": 48
+    },
+    "username": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9._-]{3,64}$",
+      "minLength": 3,
+      "maxLength": 64
+    },
+    "full_name": {
+      "type": "string",
+      "maxLength": 128,
+      "default": ""
+    },
+    "email": {
+      "type": "string",
+      "maxLength": 254,
+      "pattern": "^(|[^@\\s]+@[^@\\s]+\\.[^@\\s]+)$",
+      "default": ""
+    },
+    "role": {
+      "type": "string",
+      "enum": ["Viewer", "Editor"]
+    },
+    "disabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "password": {
+      "type": "string",
+      "maxLength": 256,
+      "default": "",
+      "description": "Portal user password (min 10 chars when setting/changing; may be empty when password_unchanged is true)."
+    },
+    "password_unchanged": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "not": {
+          "properties": { "password_unchanged": { "const": true } },
+          "required": ["password_unchanged"]
+        }
+      },
+      "then": {
+        "required": ["password"],
+        "properties": {
+          "password": { "minLength": 10 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "password": { "minLength": 1 } },
+        "required": ["password"]
+      },
+      "then": {
+        "properties": { "password": { "minLength": 10 } }
+      }
+    }
+  ]
+}
