@@ -10,16 +10,16 @@
 
 1. Because no local `go` compiler is installed on the Windows engineering host while `Python 3.14.10` (`aiohttp 3.14.5`, `pytest 9.2.0`, `pytest-asyncio 1.5.0`, `cryptography 49.0.0`, `httpx 0.28.1`) is natively available, implementing the Hub Auth-Gateway in Python 3 (`aiohttp` + pure-Python Snappy & Protobuf wire-format codec with optional C-accelerated `python-snappy` inside Linux container) enables 100% native unit & integration testing on Windows **and** minimal memory footprint in `hub/gateway/Containerfile` (`python:3.12-slim`).
 2. Tenant bearer tokens (`cms_v1_<43-char-urlsafe-random>`) are generated with `secrets.token_urlsafe(32)` (256-bit entropy) and stored **exclusively as salted SHA-256 / HMAC-SHA256 digests** in `state/tenants.json` (`0600`), keeping only an 11-char display prefix (`cms_v1_xxxx...`) for admin UI identification.
-3. Customer read-only portal isolation relies on **defense-in-depth at three independent layers**: (a) dedicated Grafana Organization with `Viewer`-only user role and `editable: false` server-proxied datasources, (b) `prom-label-proxy` (`127.0.0.1:9095`) rewriting every PromQL AST selector via `X-Scope-OrgID`, and (c) Loki (`127.0.0.1:3100`, `auth_enabled: true`) partitioning index and chunks by `X-Scope-OrgID`.
+3. Customer portal isolation relies on **defense-in-depth at four independent layers**: (a) dedicated Grafana Organization per customer supporting multiple local `Viewer` and `Editor` accounts (never `Admin` or `isGrafanaAdmin`, with Grafana alerting/provisioning disabled for non-admins and `editable: false` server-proxied datasources), (b) `hub-gateway` (`:8080`) enforcing a strict read-only query allowlist on `/api/datasources/proxy/*` and blocking `/metrics/*`, (c) `prom-label-proxy` (`127.0.0.1:9095`) rewriting every PromQL AST selector via `X-Scope-OrgID`, and (d) Loki (`127.0.0.1:3100`, `auth_enabled: true`) partitioning index and chunks by `X-Scope-OrgID`.
 
 ---
 
 ## Objective
 
 Build the security-critical multi-tenancy boundary inside `central-monitoring-hub`:
-1. **`hub-gateway` HTTP Reverse Proxy & Ingest Enforcer (`127.0.0.1:8080`):** Authenticates collector bearer tokens, decodes and re-stamps Prometheus Remote Write (`POST /api/v1/write`) and Loki Push (`POST /loki/api/v1/push`) payloads so a token for Customer A can **never** spoof or overwrite Customer B's telemetry, and proxies browser/WebSocket traffic (`/*`) to internal Grafana (`127.0.0.1:3000`) while blocking external access to internal admin/query APIs.
-2. **Grafana Multi-Org & NS8 LDAP/AD Sync:** Automatically provisions/updates MSP Main Org (Org 1, full Prometheus/Thanos + pipe-joined multi-tenant Loki `X-Scope-OrgID: t1|t2|...` + NS8 `Ldapproxy` SSO) and strictly isolated Customer Organizations (`customer_portal_enabled: true`, `Viewer` role, `prom-label-proxy` + single-tenant Loki + starter dashboards).
-3. **Tenant Lifecycle & 1-Click Standalone Agent Generator:** Implements NS8 actions `list-tenants`, `save-tenant`, `delete-tenant`, `rotate-token`, and `generate-agent-bundle` (rendering `shared/alloy-templates/*.tmpl` for Linux, Windows, and Docker).
+1. **`hub-gateway` HTTP Reverse Proxy, Ingest Enforcer (`127.0.0.1:8080`) & Loopback Relay (`127.0.0.1:9097`):** Authenticates collector bearer tokens, decodes and re-stamps Prometheus Remote Write (`POST /api/v1/write`) and Loki Push (`POST /loki/api/v1/push`) payloads so a token for Customer A can **never** spoof or overwrite Customer B's telemetry, proxies browser/WebSocket traffic (`/*` & `/api/live/ws`) to internal Grafana (`127.0.0.1:3000`) while blocking `/metrics/*` and mutating `/api/datasources/proxy/*` subpaths, and serves pod-internal `/alert-relay/{ntfy|gotify}` plus `GET /metrics/ns8-node` (`state/textfile/ns8-hub-node.prom`) strictly on `127.0.0.1:9097`.
+2. **Grafana Multi-Org, 1-Way MSP Simulation & Live NS8 LDAP/AD Multi-Select Sync:** Automatically provisions/updates MSP Main Org (Org 1, full Prometheus/Thanos + pipe-joined multi-tenant Loki `X-Scope-OrgID: t1|t2|...|_msp_internal` + Org Home Dashboard `ns8-multi-cluster-overview` + NS8 `Ldapproxy` multi-select group & user SSO), syncs genuine MSP staff 1-way into active Customer Orgs (`Admin` -> `Admin`, `Editor`/`Viewer` -> Read-Only `Viewer`) for 1-click `?orgId=<id>` support simulation, and manages strictly isolated multi-user Customer Organizations (`list-portal-users`, `save-portal-user`, `delete-portal-user`).
+3. **Tenant Lifecycle, Live Directory Discovery & 1-Click Standalone Agent Generator:** Implements all **10** tenancy/SSO/onboarding NS8 actions (`list-tenants`, `save-tenant`, `delete-tenant`, `rotate-token`, `generate-agent-bundle`, `discover-ldap-groups`, `test-ldap-user`, `list-portal-users`, `save-portal-user`, `delete-portal-user`).
 
 ---
 
@@ -61,13 +61,15 @@ hub/
       snappy_codec.py                  -> Pure-Python Snappy block decompress/compress (with optional C snappy fast-path)
       prom_remote_write.py             -> Protobuf WriteRequest parser/serializer enforcing authoritative customer/site/role labels
       loki_push.py                     -> JSON & Snappy+Protobuf logproto.PushRequest stream label enforcer + X-Scope-OrgID injection
-      proxy.py                         -> Safe Grafana HTTP + WebSocket (/api/live/ws) reverse proxy with security headers
+      proxy.py                         -> Safe Grafana HTTP + WebSocket (/api/live/ws) proxy with /metrics/* block & read-only datasource proxy allowlist
+      alert_relay.py                   -> Internal loopback (:9097) Ntfy/Gotify push relay + GET /metrics/ns8-node exporter endpoint
   imageroot/
     pypkg/
       hub_tenancy/
         store.py                       -> Atomic file-locked CRUD on state/tenants.json & portal users (0600) + token hashing/rotation
-        grafana_sync.py                -> Idempotent Grafana HTTP API client syncing Org 1, Customer Orgs, multi-user accounts, datasources, dashboards
-        ldap_sync.py                   -> Queries agent.ldapproxy.Ldapproxy, discovers AD/LDAP groups, tests user role mappings & renders ldap.toml
+        grafana_sync.py                -> Idempotent Grafana 11 HTTP API client syncing Org 1, Customer Orgs, 6 dashboards, Org Home Dashboard & 1-way MSP staff
+        ldap_client.py                 -> Pure-Python RFC 4511 LDAPv3 client for AD & RFC2307 group + user discovery and login role simulation
+        ldap_sync.py                   -> Queries agent.ldapproxy.Ldapproxy, resolves multi-principal DNs & renders multi-org ldap.toml
         bundle_renderer.py             -> Renders shared/alloy-templates/*.tmpl with strict escaping
     actions/
       list-tenants/                    -> validate-input.json, validate-output.json, 20read
@@ -103,7 +105,7 @@ tests/
 1. **MSP Main Org (Org ID `1`):**
    - Datasource `Prometheus` (`uid: "prometheus"`, `isDefault: true`, `editable: false`): URL `${PROMQL_UPSTREAM_URL}` (`http://127.0.0.1:9090` in `local` mode; `http://127.0.0.1:10902` Thanos Query in `s3` mode).
    - Datasource `Loki` (`uid: "loki"`, `editable: false`): URL `http://127.0.0.1:3100` with `httpHeaderName1: "X-Scope-OrgID"` and `secureJsonData.httpHeaderValue1` set to the pipe-joined list of all registered tenant slugs plus `_msp_internal` (e.g., `acme-corp|beta-gmbh|_msp_internal`). Re-synced automatically on every `save-tenant` / `delete-tenant`!
-   - Dashboards: All 4 JSON models from `shared/dashboards/` imported into folder `MSP Central Monitoring`.
+   - Dashboards & Home Page: All **6** Enterprise NOC JSON models (`117` panels) from `shared/dashboards/` (`ns8-multi-cluster-overview.json`, `ns8-pods-and-modules.json`, `linux-windows-servers.json`, `proxmox-snmp-infrastructure.json`, `web-ssl-uptime.json`, `central-log-explorer.json`) provisioned/reloaded via `POST /api/admin/provisioning/dashboards/reload` (ignoring Grafana 11 `400 Cannot save provisioned dashboard` on file-provisioned Org 1), with Org Home Dashboard set to `ns8-multi-cluster-overview`.
    - **NS8 LDAP/AD SSO (`ldap_enabled == true`) + Multi-Select Group & User Discovery + Login Tester:**
      - Queries `Ldapproxy().get_domain(ldap_domain)`, maps host `10.0.2.2` and proxy port into `/etc/grafana/ldap.toml` (mounted via parent directory `--volume=%E/config/grafana:/etc/grafana:ro,z` so atomic `os.replace` updates take effect immediately without stale inodes).
      - Maps multi-select `ldap_admin_principals` -> Org 1 `Admin` (`grafana_admin = true` on Org 1; `Admin` on active Customer Orgs `c_oid > 1`), `ldap_editor_principals` -> Org 1 `Editor` (`Viewer` on Customer Orgs `c_oid > 1`), and `ldap_viewer_principals` -> Org 1 `Viewer` (`Viewer` on Customer Orgs `c_oid > 1`), accepting multiple AD/LDAP groups **and/or** individual AD/LDAP users (short names or full DNs up to 512 chars).
@@ -118,7 +120,8 @@ tests/
      - Supports multiple local Grafana accounts per tenant (`role`: `"Viewer"` or `"Editor"` scoped **strictly** to that tenant's Customer Org, never `Admin`, never `isGrafanaAdmin`, and **always** evicted from Org 1 and all other Customer Orgs!). Because datasources are `editable: false` and `hub-gateway` restricts `/api/datasources/proxy/*` strictly to read-only query paths, even Customer Org `Editor`s (who can build/customize dashboards inside their own Customer Org) can **never** query or write another tenant's metrics or logs!
      - Usernames (`^[a-zA-Z0-9._-]{3,64}$`) enforce global case-insensitive uniqueness across all tenants and block reserved names (`admin`, `root`, `GRAFANA_ADMIN_USER`).
      - Supports `disabled: true|false` per user and `password_unchanged: true` on edits; `list-tenants` exposes `portal_users_count` plus backward-compatible primary `portal_viewer_username` and `grafana_login_url`.
-   - Copies of the 4 starter dashboards imported into the Customer Org with `$customer` locked/hidden to `<customer>`.
+   - Copies of all **6** Enterprise NOC dashboards (`117` panels) imported into each Customer Org with `$customer` locked/hidden (`type="constant"`, `hide=2`) to `<customer>` while leaving `$site`, `$instance`, `$module_id`, `$device_role`, `$job`, `$level`, and `$log_search` interactive, and setting Org Home Dashboard to `ns8-multi-cluster-overview`.
+   - **1-Way MSP Staff Support Simulation (`?orgId=<id>`):** Genuine MSP Org-1 accounts (`admin`, `isGrafanaAdmin`, or external LDAP users — never customer portal accounts) are synced one-way into active Customer Orgs (`Admin` -> `Admin`; MSP `Editor`/`Viewer` -> Read-Only `Viewer`) without changing their default Org 1 context.
    - Toggling `customer_portal_enabled` to `false` disables/evicts all portal users' access immediately without deleting historical TSDB/Loki telemetry.
 
 ---
@@ -179,17 +182,17 @@ def process_remote_write(compressed_body: bytes, token_meta: dict) -> bytes:
   - Enforce all 8 NS8 backend rules in `list-tenants`, `save-tenant`, `delete-tenant`, `rotate-token`, and `generate-agent-bundle`.
   - Reload `hub-gateway`'s in-memory token table automatically on file mtime change or `SIGHUP` without dropping in-flight requests.
 - **Ask first:**
-  - Granting any role higher than `Viewer` in Customer Portal Grafana Organizations.
+  - Granting `Admin` or `isGrafanaAdmin` to any Customer Portal local account (Customer Portal roles are strictly bounded to `Viewer` and `Editor` with non-editable datasources).
   - Exposing any additional unauthenticated path on `hub-gateway`.
 - **Never:**
   - Return full bearer tokens from `list-tenants` or `get-configuration`.
-  - Expose `prom-label-proxy` (`:9095`), Prometheus (`:9090`), Thanos (`:10902`), or Loki (`:3100`) directly on host ports or Traefik routes.
+  - Expose `prom-label-proxy` (`:9095`), Prometheus (`:9090`), Thanos (`:10902`), Loki (`:3100`), or internal relay/metrics (`:9097`) directly on host ports or `:8080` public routes.
 
 ---
 
 ## Success Criteria
 
-- [ ] `POST /api/v1/write` and `POST /loki/api/v1/push` pass end-to-end async integration tests including cross-tenant spoofing rejection/overwriting, rate limiting, and decompression-cap enforcement.
-- [ ] All 5 tenancy/onboarding NS8 actions (`list-tenants`, `save-tenant`, `delete-tenant`, `rotate-token`, `generate-agent-bundle`) validate cleanly against `shared/schemas/hub-*.json`.
-- [ ] Grafana sync logic deterministically provisions Org 1 (full PromQL + pipe-joined multi-tenant Loki + LDAP config) and Customer Orgs (`Viewer`-only + `prom-label-proxy` + single-tenant Loki).
-- [ ] `generate-agent-bundle` produces complete, valid Alloy configs and 1-click installers for `linux`, `windows`, and `docker` from `shared/alloy-templates/`.
+- [ ] `POST /api/v1/write` and `POST /loki/api/v1/push` pass end-to-end async integration tests including cross-tenant spoofing rejection/overwriting, rightmost `X-Forwarded-For` rate limiting, `/metrics/*` & `/api/datasources/proxy/*` write/config blocking, and decompression-cap enforcement.
+- [ ] All **10** tenancy/LDAP/portal NS8 actions (`list-tenants`, `save-tenant`, `delete-tenant`, `rotate-token`, `generate-agent-bundle`, `discover-ldap-groups`, `test-ldap-user`, `list-portal-users`, `save-portal-user`, `delete-portal-user`) validate cleanly against `shared/schemas/hub-*.json`.
+- [ ] Grafana sync logic deterministically provisions Org 1 (full PromQL + pipe-joined multi-tenant Loki + multi-principal `ldap.toml` + 6 dashboards) and Customer Orgs (multi-user `Viewer`/`Editor` + 1-way MSP simulation + `prom-label-proxy` + single-tenant Loki + 6 locked dashboards).
+- [ ] `generate-agent-bundle` produces complete, valid Alloy configs and hardened 1-click installers for `linux`, `windows`, and `docker` from `shared/alloy-templates/`.

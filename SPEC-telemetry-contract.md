@@ -71,26 +71,26 @@ shared/
     collector-*-input.json             -> 6 self-contained Draft-07 NS8 action input schemas for central-monitoring-collector
     collector-*-output.json            -> 6 self-contained Draft-07 NS8 action output schemas for central-monitoring-collector
   rules/
-    ns8-cluster.yml                    -> NS8 node, CPU/RAM/swap, disk/predict_linear, mdadm, Restic backup, container & systemd rules
-    linux-node.yml                     -> Linux host down, load, OOM, fs/inodes, disk I/O, systemd, NTP, reboot rules
-    windows-node.yml                   -> Windows host down, CPU/RAM, logical disk, auto-services, AD/DNS/SMB, reboot rules
-    proxmox-ve.yml                     -> Proxmox node, quorum, storage pools, ZFS health, auto-start VM/LXC, IO delay rules
-    blackbox-web-ssl.yml               -> HTTP availability, status >=400/500, latency >3s, TLS expiry <21d/<7d, DNS/TCP rules
-    snmp-network-ups.yml               -> SNMP reachability, UPS battery/runtime/replace, switch/firewall ifOperStatus/errors, NAS health
+    ns8-cluster.yml                    -> 20 rules: NS8 node, CPU/RAM/swap, disk/predict_linear, mdadm, Restic backup, container, systemd & cgroups-v2 pod OOM/RAM-limit/swap
+    linux-node.yml                     -> 15 rules: Linux host down, load, OOM, fs/inodes, disk I/O, systemd, NTP, reboot
+    windows-node.yml                   -> 12 rules: Windows host down, CPU/RAM, logical disk, auto-services, AD/DNS/SMB, reboot
+    proxmox-ve.yml                     -> 11 rules: Proxmox node, quorum, storage pools, ZFS health, auto-start VM/LXC, IO delay
+    blackbox-web-ssl.yml               -> 8 rules: HTTP availability, status >=400/500, latency >3s, TLS expiry <21d/<7d, DNS/TCP
+    snmp-network-ups.yml               -> 15 rules: SNMP reachability, UPS battery/runtime/replace, switch/firewall ifOperStatus/errors, Synology/QNAP NAS & RFC 3805 Printer
   dashboards/
-    ns8-multi-cluster-overview.json    -> MSP Fleet Executive Summary (KPI sparklines, active alerts, Restic backups, top hosts & NS8 pods, Loki errors)
-    ns8-pods-and-modules.json          -> NethServer 8 Pods, Modules & Containers Deep-Dive (cgroups-v2 CPU, Working-Set RAM, Swap, OOM kills, I/O, sub-unit breakdown)
-    linux-windows-servers.json         -> Detailed Linux & Windows server metrics (CPU modes, load vs cores, disk latency/IOPS, network) + host logs
-    proxmox-snmp-infrastructure.json   -> Proxmox VE, SNMP network/firewall/UPS/NAS/Printer metrics + Syslog stream
-    web-ssl-uptime.json                -> Blackbox availability state-timeline, stacked HTTP phases, TLS certificate expiry SLA countdown
-    central-log-explorer.json          -> Central Log & Security Explorer (LogQL volume histogram by level, top log sources, full-text search)
+    ns8-multi-cluster-overview.json    -> MSP Fleet Executive Summary (22 panels: KPI sparklines, active alerts, Restic backups, top hosts & NS8 pods, Loki errors)
+    ns8-pods-and-modules.json          -> NethServer 8 Pods, Modules & Containers Deep-Dive (21 panels: cgroups-v2 CPU, Working-Set RAM, Swap, OOM kills, I/O, sub-units)
+    linux-windows-servers.json         -> Detailed Linux & Windows server metrics (24 panels: CPU modes, load vs cores, disk latency/IOPS, network) + host logs
+    proxmox-snmp-infrastructure.json   -> Proxmox VE, SNMP network/firewall/UPS/NAS/Printer metrics (27 panels: incl. port utilization % via ifHighSpeed/ifSpeed) + Syslog
+    web-ssl-uptime.json                -> Blackbox SLA & SSL Certificate Countdown (13 panels: state-timeline, stacked HTTP phases, TLS expiry matrix)
+    central-log-explorer.json          -> Central Log & Security Explorer (10 panels: LogQL volume histogram by level, top log sources, full-text search)
   alloy-templates/
     config-linux.alloy.tmpl            -> Standalone Linux Alloy config (unix exporter + journal + optional SNMP/Syslog + WAL)
     config-windows.alloy.tmpl          -> Standalone Windows Alloy config (windows exporter + eventlog + WAL)
     config-docker.alloy.tmpl           -> Standalone Docker Alloy config (containers + host + optional LAN SNMP/Proxmox/Syslog + WAL)
-    install-linux.sh.tmpl              -> Idempotent Debian/Ubuntu/RHEL/Rocky bash installer
-    install-windows.ps1.tmpl           -> Idempotent Windows Server PowerShell installer
-    docker-compose.yml.tmpl            -> Docker Compose deployment with persistent WAL volume
+    install-linux.sh.tmpl              -> Idempotent Debian/Ubuntu/RHEL/Rocky bash installer (atomic umask 0077 / 0640 config + systemd auto-restart)
+    install-windows.ps1.tmpl           -> Idempotent Windows Server PowerShell installer (Authenticode check, ProgramData NTFS ACLs, service recovery & non-admin stop protection)
+    docker-compose.yml.tmpl            -> Docker Compose deployment with persistent WAL volume & 127.0.0.1:5514 Syslog guidance
 tests/
   contract/                            -> Automated schema, rule label preservation, dashboard & template contract tests
 ```
@@ -121,7 +121,7 @@ All external traffic enters via NS8 Traefik (`https://<host>`) -> `127.0.0.1:${T
 | `POST /api/v1/write` | `Authorization: Bearer cms_v1_...` | `204 No Content` / `200 OK` | Decodes Snappy + Protobuf `prometheus.WriteRequest`, strips any client `customer` label, injects authoritative `customer=<token.customer>` in sorted label order, validates `site`/`device_role`/`collector_id`, re-encodes Snappy + Protobuf, forwards to `http://127.0.0.1:9090/api/v1/write`. Max compressed body: `16 MiB`. |
 | `POST /loki/api/v1/push` | `Authorization: Bearer cms_v1_...` | `204 No Content` | Strips any client `X-Scope-OrgID`, injects authoritative `X-Scope-OrgID: <token.customer>`, rewrites stream label set to enforce `customer="<token.customer>"`, forwards to `http://127.0.0.1:3100/loki/api/v1/push`. Max compressed body: `16 MiB`. |
 | `GET /api/v1/ingest/verify` | `Authorization: Bearer cms_v1_...` | `200 OK` | Lightweight connectivity & token check used by `test-hub-connection`. Returns `{"status":"ok","customer":"<slug>","token_prefix":"cms_v1_..."}`. |
-| `ANY /*` (all other paths) | Grafana Session / LDAP | Upstream status | Proxied to internal Grafana (`http://127.0.0.1:3000`) including WebSocket `/api/live/ws`. Internal Prometheus (`:9090`), Thanos (`:10902`), Loki (`:3100`), Alertmanager (`:9093`), and `prom-label-proxy` (`:9095`) are **NEVER** reachable via `hub-gateway` public paths. |
+| `ANY /*` (all other paths) | Grafana Session / LDAP | Upstream status | Proxied to internal Grafana (`http://127.0.0.1:3000`) including WebSocket `/api/live/ws`. Internal Prometheus (`:9090`), Thanos (`:10902`), Loki (`:3100`), Alertmanager (`:9093`), `prom-label-proxy` (`:9095`), `:9097/metrics/ns8-node`, and all `/metrics/*` or mutating `/api/datasources/proxy/*` paths are **NEVER** reachable via `hub-gateway` public paths (`403 Forbidden`). |
 
 ### 3. Consistent Error Envelope
 
@@ -206,8 +206,8 @@ def enforce_canonical_labels(
 
 - **Framework:** `pytest` (`python -m pytest tests/contract -v`) with `jsonschema 4.26.0` (`Draft7Validator`).
 - **Schema Meta-Validation:** Every `shared/schemas/*.json` file must parse via `json.load`, pass `Draft7Validator.check_schema`, contain zero external file `$ref`s, and validate both positive fixtures and negative abuse-case fixtures (e.g., `customer: "Customer_A"` uppercase rejected, `customer: "../etc"` path traversal rejected, `storage_mode: "s3"` without `s3.bucket` rejected).
-- **Rule Pack Contract Tests:** Parse all 6 `shared/rules/*.yml` files, assert balanced PromQL parentheses/braces, required `severity` and `category` labels, `summary` + `description` annotations, and `customer`/`site` preservation in `by (...)` clauses.
-- **Dashboard Contract Tests:** Parse all 4 `shared/dashboards/*.json` files, verify `schemaVersion >= 39`, datasource UIDs `prometheus` and `loki`, and `$customer` / `$site` templating variables.
+- **Rule Pack Contract Tests:** Parse all 6 `shared/rules/*.yml` files (`81` alert rules), assert balanced PromQL parentheses/braces, required `severity` and `category` labels, `summary` + `description` annotations, and `customer`/`site` preservation in `by (...)` / `on (...)` clauses.
+- **Dashboard Contract Tests:** Parse all 6 `shared/dashboards/*.json` files (`117` panels), verify `schemaVersion >= 39`, datasource UIDs `prometheus` and `loki`, and `$customer` / `$site` templating variables.
 - **Line-Ending Gate:** Automated test fails if any tracked text file contains `\r\n`.
 
 ---
@@ -216,7 +216,7 @@ def enforce_canonical_labels(
 
 - **Always:**
   - Use LF (`\n`) line endings in every schema, rule, dashboard, template, and script (`.gitattributes` enforced).
-  - Keep every NS8 action schema in `shared/schemas/` 100% self-contained JSON Schema Draft-07 without external `$ref`s.
+  - Keep every NS8 action schema in `shared/schemas/` 100% self-contained JSON Schema Draft-07 without external `$ref`s (`57` schemas total: `1` contract schema + `56` byte-identical action schemas across `22` Hub API actions + `6` Collector API actions).
   - Redact secrets (`has_secret_key`, `token_prefix`, `has_auth_token`) in all `get-*` and `list-*` output schemas; return plaintext bearer tokens **only** on initial `save-tenant` creation or `rotate-token`.
 - **Ask first:**
   - Adding a new mandatory label (increases Prometheus TSDB cardinality across >1,500 systems).
@@ -230,7 +230,7 @@ def enforce_canonical_labels(
 
 ## Success Criteria
 
-- [ ] All 47 JSON Schema files in `shared/schemas/` parse cleanly with `json.load` and pass `jsonschema.Draft7Validator.check_schema`.
-- [ ] Positive and negative payload fixtures exist and pass for Hub and Collector action schemas (`configure-module`, `save-tenant`, `save-target`, `configure-alerting`, `create-silence`, `save-local-target`).
-- [ ] All 6 rule packs in `shared/rules/`, all 4 dashboards in `shared/dashboards/`, and all 6 templates in `shared/alloy-templates/` conform to the canonical `customer`, `site`, `device_role`, and `collector_id` contract.
-- [ ] Zero files in the repository contain CRLF (`\r\n`) line endings.
+- [ ] All 57 JSON Schema files in `shared/schemas/` parse cleanly with `json.load` and pass `jsonschema.Draft7Validator.check_schema`, with all 56 action schemas byte-identical to `imageroot/actions/*/validate-*.json`.
+- [ ] Positive and negative payload fixtures exist and pass for Hub and Collector action schemas (`configure-module`, `save-tenant`, `save-portal-user`, `discover-ldap-groups`, `test-ldap-user`, `save-target`, `configure-alerting`, `create-silence`, `save-local-target`).
+- [ ] All 6 rule packs (`81` rules) in `shared/rules/`, all 6 dashboards (`117` panels) in `shared/dashboards/`, and all 6 templates in `shared/alloy-templates/` conform to the canonical `customer`, `site`, `device_role`, and `collector_id` contract.
+- [ ] Zero text files in the repository contain CRLF (`\r\n`) line endings.

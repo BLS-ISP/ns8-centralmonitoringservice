@@ -18,7 +18,7 @@
 
 Deliver a clean, responsive, accessible NethServer 8 Cockpit administration UI (`hub/ui/`) for `central-monitoring-hub` enabling MSP engineers to:
 1. **Status & Overview (`Status.vue`):** View core NS8 container/node status (via built-in `get-status`) alongside Hub operational health, storage usage (`local` vs `s3` Thanos/Loki), active series/tenants/targets/firing alerts counts, and 1-click launch buttons for **"Open Grafana"** (`/?orgId=1`), **"NS8-Pods"** (`/d/ns8-pods-and-modules?orgId=1`), and **"Log-Explorer"** (`/d/central-log-explorer?orgId=1`).
-2. **Tenants, Multi-User Customer Portals & Onboarding (`Tenants.vue`):** Create/edit/delete customer tenants and sites, toggle strictly isolated Customer Grafana Portals (`customer_portal_enabled`), manage **multiple Grafana accounts per customer** (`list-portal-users`, `save-portal-user`, `delete-portal-user` with `Viewer`/`Editor` role, disable switch, password reset, and direct Grafana Org login link), copy newly generated tokens once, rotate tokens with grace periods (`rotate-token`), and generate/download 1-click **Standalone Grafana Alloy** onboarding bundles for **Linux**, **Windows**, and **Docker** (`generate-agent-bundle`).
+2. **Tenants, Multi-User Customer Portals, 1-Click MSP Simulation & Onboarding (`Tenants.vue`):** Create/edit/delete customer tenants and sites, manage **Customer Accounts** in a dedicated modal (including inline `customer_portal_enabled` activation, multiple `Viewer`/`Editor` accounts, password generator/reset, disable switch, and 1-click credential copy), launch **1-Click MSP Simulated Customer View** (`/?orgId=<grafana_org_id>` for portal-enabled tenants or `/d/ns8-multi-cluster-overview?orgId=1&var-customer=<slug>` filtered Org-1 fallback), copy newly generated tokens once, rotate tokens with grace periods (`rotate-token`), and generate/download 1-click **Standalone Grafana Alloy** onboarding bundles for **Linux**, **Windows**, and **Docker** (`generate-agent-bundle`).
 3. **Central Targets & Probes (`Targets.vue`):** Manage central `ns8-federation`, `exporter`, `blackbox` (HTTP/HTTPS/SSL, DNS, TCP), and `snmp` (v2c/v3) scrape targets with customer/site dropdowns.
 4. **Alerting & Maintenance Windows (`Alerting.vue`):** Configure NS8 Smarthost / SMTP email, PSA/Ticket Webhook, MS Teams / Slack, Ntfy / Telegram / Gotify push notifications, per-customer email routing, toggle standard MSP rule packs, fire live test alerts (`test-alert`), and create/expire Alertmanager maintenance windows (`list-silences`, `create-silence`, `delete-silence`).
 5. **Settings, Hub Self-Monitoring & Multi-Select AD/LDAP Discovery (`Settings.vue`):** Configure FQDN (`host`), Let's Encrypt, HTTP->HTTPS, Prometheus/Loki retention, Restic TSDB backup toggle (`backup_include_tsdb`), **Local NS8 Node & Pod Self-Monitoring** (`monitor_local_ns8_node`, `local_node_customer` defaulting to `"_msp_internal"` or tenant picker, `local_node_site` defaulting to `"hub"`), Storage Mode (`local` vs `s3`/MinIO credentials), **NS8 LDAP/AD SSO** (`ldap_enabled`, domain picker, live `discover-ldap-groups` directory browser returning both `groups` and `users` with `All | Groups Only | Users Only` scope filter feeding three `<NsMultiSelect>` role pickers `ldap_admin_principals`, `ldap_editor_principals`, and `ldap_viewer_principals`, plus interactive `test-ldap-user` role-mapping verifier), and Grafana admin password (`configure-module`).
@@ -172,7 +172,7 @@ export default {
 ## Testing Strategy
 
 - **Build Verification:** `npm --prefix hub/ui run build` must complete with exit code `0` and emit `hub/ui/dist/index.html` + hashed JS/CSS chunks without missing imports.
-- **Automated NS8 UI Audit (`tests/hub_ui/test_ui_compliance.py` + `npm test`):**
+- **Automated NS8 UI Audit (`tests/hub_ui/test_hub_ui_compliance.py` + `npm test`):**
   - AST/Regex scan across `hub/ui/src/**/*.vue` and `*.js` asserting:
     1. Zero occurrences of `createSuccessNotificationForApp`.
     2. Every `createErrorNotificationForApp(` call passes 2 arguments.
@@ -199,6 +199,6 @@ export default {
 
 ## Success Criteria
 
-- [ ] `npm --prefix hub/ui run build` succeeds cleanly on `Node.js v26.13.1` / `npm 11.20.0`, producing `hub/ui/dist/`.
-- [ ] All 5 primary views (`Status`, `Tenants`, `Targets`, `Alerting`, `Settings`) cover 100% of Hub NS8 actions defined in `shared/schemas/hub-*.json`.
-- [ ] Automated UI audit suite passes all 3 NS8 Cockpit UI rules (`TaskService` notifications, Carbon icon registration, `en`+`de` `VueI18n` parity & mandatory keys).
+- [ ] `npm --prefix hub/ui run build` succeeds cleanly on `Node.js v26.13.1` / `npm 11.20.0` with `0` warnings, producing `hub/ui/dist/` (including `metadata.json` and `module_default_icon.png`).
+- [ ] All 5 primary views (`Status`, `Tenants`, `Targets`, `Alerting`, `Settings`) cover 100% of the **22** schema-validated Hub NS8 actions (`26` Hub actions total including NS8 lifecycle hooks) defined in `shared/schemas/hub-*.json`.
+- [ ] Automated UI audit suite passes all 3 NS8 Cockpit UI rules (`TaskService` notifications, Carbon icon registration, `en`+`de` `VueI18n` parity incl. `{range}` pagination & mandatory keys).

@@ -1,6 +1,14 @@
 # MSP Betriebshandbuch (`docs/operations-guide.md`)
 
-Dieses Day-2-Administrationshandbuch begleitet Systemhaus- und MSP-Techniker durch Planung, Dimensionierung, S3/Thanos-Einrichtung, LDAP/AD-Anbindung, Standort-Onboarding, SNMP-/Proxmox-Integration, Multi-Channel-Alarmierung, Wartungsfenster (Silences) sowie Backup und Disaster Recovery für den **NS8 Central Monitoring Service**.
+Dieses Day-2-Administrationshandbuch begleitet Systemhaus- und MSP-Techniker durch Planung, Dimensionierung, S3/Thanos-Einrichtung, LDAP/AD-Anbindung, Standort-Onboarding, SNMP-/Proxmox-Integration, Multi-Channel-Alarmierung, Wartungsfenster (Silences) sowie Backup und Disaster Recovery für den **NS8 Central Monitoring Service (`v1.1.0`)**.
+
+> [!TIP]
+> **Begleitende Handbücher & Referenzen:**
+> - UI-Bedienungsanleitung (Seite für Seite): **[MSP Benutzerhandbuch (`docs/user-guide.md`)](user-guide.md)**
+> - Zur direkten Weitergabe an Endkunden: **[Kundenportal-Handbuch (`docs/customer-portal-guide.md`)](customer-portal-guide.md)**
+> - Katalog aller 6 NOC-Dashboards & 81 Alarmregeln: **[Dashboard- & Alarmregel-Referenz (`docs/dashboards-and-alerts.md`)](dashboards-and-alerts.md)**
+> - Architektur, Port-Maps & ADRs (`ADR-001`–`ADR-007`): **[Architektur- & Sicherheitsreferenz (`docs/architecture.md`)](architecture.md)**
+> - Ablösung von PRTG, Checkmk oder Zabbix: **[Migrationsleitfaden (`docs/migration-guide.md`)](migration-guide.md)**
 
 ---
 
@@ -151,11 +159,12 @@ flowchart TD
 1. Öffnen Sie im Hub **Mandanten -> Agent-Onboarding (1-Klick-Bundle)** beim gewünschten Mandanten.
 2. Wählen Sie Standort (`site`), Plattform (`windows`, `linux` oder `docker`) und eine sprechende `collector_id` (z. B. `autohaus-hq-dc01`).
 3. Laden Sie die generierten Dateien herunter und führen Sie sie auf dem Zielsystem aus:
-   - **Windows Server (2016/2019/2022/2025) — als Administrator in PowerShell:**
+   - **Windows Server (2016/2019/2022/2025) & Terminalserver/Workstations — als Administrator bzw. `SYSTEM` in PowerShell:**
      ```powershell
      Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
      .\install-windows.ps1
      ```
+     *Hintergrunddienst, Manipulationsschutz & Massenverteilung (GPO / Intune / NS8 SoftwareManager):* `install-windows.ps1` prüft die Authenticode-Signatur des Installers, richtet Alloy als unsichtbaren Windows-Hintergrunddienst (`StartupType Automatic`) ein, sperrt `C:\Program Files\GrafanaLabs\Alloy\config.alloy` sowie `C:\ProgramData\GrafanaLabs\Alloy\data` **vor** dem Schreiben des Bearer-Tokens per NTFS-ACL exklusiv auf `NT AUTHORITY\SYSTEM` und lokale `Administratoren` (Standard-/RDS-Benutzer können weder das Token lesen noch den Dienst beenden) und konfiguriert über `sc.exe failure "Alloy"` einen automatischen Selbstheilungs-Neustart (`5s / 15s / 30s`).
      *Hinweis für Domain Controller / Dateiserver:* Ergänzen Sie in `C:\Program Files\GrafanaLabs\Alloy\config.alloy` im Block `prometheus.exporter.windows "local_windows"` die Collector `"ad"`, `"dns"` und `"smb"` und starten Sie den Dienst `Restart-Service Alloy` neu, um auch AD-Replikations-, DNS- und SMB-Alarme aus `windows-node.yml` zu aktivieren.
    - **Linux Server (Debian 11/12+, Ubuntu 20.04–24.04+, RHEL/Rocky/AlmaLinux 8/9+):**
      ```bash

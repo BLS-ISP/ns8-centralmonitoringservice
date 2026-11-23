@@ -90,19 +90,20 @@ hub/
         validate-output.json           -> Exact copy of shared/schemas/hub-get-overview-output.json
         20read                         -> Fast health, active series/alerts/tenants counts, and volume byte sizes
       restore-module/
-        06copyenv                      -> Restores environment vars, calls agent.dump_env()
-        50configure                    -> Restores grafana.db from grafana.db.bak, re-registers Traefik route, starts pod
+        06copyenv                      -> Restores environment vars + backfills LDAP_*_PRINCIPALS_B64 & MONITOR_LOCAL_NS8_NODE, calls agent.dump_env()
+        50configure                    -> Restores grafana.db from grafana.db.bak, re-registers Traefik route, reconciles hub-ns8-metrics.timer, starts pod
       clone-module/
-        50configure                    -> Regenerates MODULE_ID-specific secrets, clears/updates FQDN route, starts pod
+        50configure                    -> Regenerates MODULE_ID-specific secrets, syncs Grafana Orgs, reconciles hub-ns8-metrics.timer, starts pod
       destroy-module/
-        20destroy                      -> Removes Traefik route, stops systemd units, removes pod and volumes
+        20destroy                      -> Removes Traefik route, stops/disables all 13 .service + hub-ns8-metrics.timer units, removes pod and volumes
     events/
       smarthost-changed/
         10reload_services              -> Refreshes smarthost.env, re-renders alertmanager.yml, reloads Alertmanager
       user-domain-changed/
         10handler                      -> Updates Grafana ldap.toml when NS8 Ldapproxy ports/domains change
     update-module.d/
-      20pull_images                    -> Pulls updated container images during module upgrades (never in systemd!)
+      20pull_images                    -> Pulls updated container images & backfills v1.0.4/v1.1.0 env defaults during module upgrades
+      50update                         -> Re-renders core/probe/alerting configs, reconciles hub-ns8-metrics.timer, and restarts services in-place
     systemd/user/
       central-monitoring-hub.service   -> Podman pod manager (-p 127.0.0.1:${TCP_PORT}:8080, slirp4netns host loopback)
       prometheus.service               -> Prometheus (:9090, --web.enable-remote-write-receiver, --web.enable-lifecycle)
